@@ -7,7 +7,7 @@
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_InDesign_Resize
 Version=1.6.5
-Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/InDesgin
+Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=InDesign配置に合わせてリサイズ
 Author=Murakami Yoshiteru
 Release-Date=2026-05-13

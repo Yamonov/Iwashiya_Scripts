@@ -9,7 +9,7 @@
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_InDesign_Crop
 Version=1.3.3
-Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/InDesgin
+Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=InDesignのフレームに合わせて伸ばす
 Author=Murakami Yoshiteru
 Release-Date=2026-05-13
