@@ -1,0 +1,49 @@
+(*
+SCRIPTMETA-BEGIN
+Script-ID=org.iwashi.BridgeOpen
+Version=1
+Release-Date=2026-03-23
+Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Finder
+Target-App=Finder
+Description-BEGIN
+Finderで選択しているファイルやフォルダをBridgeで開きます。
+Keyboard Maestroでショートカットキーで実行したり、スクリプトエディタでアプリ化してFinderツールバーに置いて実行するといい感じです。
+このスクリプト本体はこのままどこかに置いておき、アップデート通知を受け取れるようにしておいてください。
+Description-END
+SCRIPTMETA-END
+
+*)
+
+try
+	set myBridge to application id "com.adobe.bridge"
+	set myBridgeName to name of myBridge
+on error
+	display alert "Adobe Bridgeが見つかりません。"
+	return
+end try
+
+tell application "Finder"
+	set mySel to selection
+	
+	if mySel is {} then
+		try
+			set myTarget to insertion location as alias
+		on error
+			set myTarget to path to desktop
+		end try
+	else
+		set myItem to item 1 of mySel as alias
+		
+		try
+			set myItem to original item of myItem as alias
+		end try
+		
+		set myTarget to myItem
+	end if
+end tell
+
+set myPathString to POSIX path of myTarget
+
+tell application id "com.adobe.bridge" to activate
+
+do shell script "open -a " & quoted form of myBridgeName & " " & quoted form of myPathString
