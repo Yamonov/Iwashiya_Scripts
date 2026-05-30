@@ -5,7 +5,7 @@
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CMYKChannelCopies
 Version=0.5
-Meta-URL=https://gist.github.com/Yamonov/080326646de671d067804af58075730d
+Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=分版オブジェクト生成
 Author=Yoshiteru Murakami
 Release-Date=2026-05-27
