@@ -1,8 +1,12 @@
 SCRIPTMETA-DIST-BEGIN
 
+Script-ID=org.iwashi.CMYKto100GCRConverter_ai
+Version=2.1.5
+
+Script-ID=org.iwashi.IllustratorCrop_RelinkFitter
+Version=0.7
+
 Script-ID=org.iwashi.CMYKChannelCopies
 Version=0.5
-
-
 
 SCRIPTMETA-DIST-END
