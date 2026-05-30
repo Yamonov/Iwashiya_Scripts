@@ -1,0 +1,9 @@
+SCRIPTMETA-DIST-BEGIN
+
+Script-ID=org.iwashi.Photoshop_Illustrator_Crop
+Version=0.7
+
+Script-ID=org.iwashi.Photoshop_Illustrator_Resize
+Version=1.6.5
+
+SCRIPTMETA-DIST-END

@@ -4,7 +4,7 @@
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
 Version=2.1.5
-Meta-URL=https://gist.github.com/Yamonov/3a90a9a50389c68095c5f14577ad09d5
+Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=色を変えずにCMYK値を300%以下にする
 Author=Murakami Yoshiteru
 Release-Date=2026-05-04

@@ -4,7 +4,7 @@
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.IllustratorCrop_RelinkFitter
 Version=0.7
-Meta-URL=https://gist.github.com/Yamonov/b63d9c67402ef7af4c17ab33caccce31
+Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=Psの伸ばし情報で位置を変えずに再配置
 Author=Murakami Yoshiteru
 Release-Date=2026-05-13
