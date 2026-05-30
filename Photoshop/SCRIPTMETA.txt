@@ -6,4 +6,10 @@ Version=0.7
 Script-ID=org.iwashi.Photoshop_Illustrator_Resize
 Version=1.6.5
 
+Script-ID=org.iwashi.Photoshop_InDesign_Resize
+Version=1.6.5
+
+Script-ID=org.iwashi.Photoshop_InDesign_Crop
+Version=1.3.3
+
 SCRIPTMETA-DIST-END
