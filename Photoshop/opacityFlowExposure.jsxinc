@@ -1,0 +1,131 @@
+/*
+SCRIPTMETA-BEGIN
+Script-ID=org.iwashi.Photoshop_OpacityFlowExposure
+Version=1
+Release-Date=2026-03-23
+Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
+Target-App=Photoshop
+Description-BEGIN
+ブラシの不透明度と流量を変更する、本体スクリプトです。
+
+$.evalFile(File(File($.fileName).parent + "/opacityFlowExposure.jsxinc")); r($.fileName);
+
+を書き込んだ、ファイル名「OFE_xxx.jsx」を複数作成し、同じフォルダ内に置いて、そちらを実行してください。
+ファイル名のxxx部分を読み取って動作を変更します。
+F：flow（流量）、O：opacity（不透明度）
+に続けて、０〜100、または-、+を付けてください。
+例：
+OFE_F-.jsx　（Flowをいい感じに一段階下げます）
+OFE_O100.jsx　（Opacityを最大値に設定します）
+Description-END
+SCRIPTMETA-END
+*/
+
+
+function r(f) {
+    var b = File(f).name;
+    var p = "OFE_";
+    var d = b.lastIndexOf(".");
+    var c;
+    var m = { O: "opacity", F: "flow" };
+    var k;
+    var u;
+    var a = [2, 4, 6, 8, 10, 12, 14, 16, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+    var t = app.currentTool;
+    var iu = stringIDToTypeID("percentUnit");
+    var inull = charIDToTypeID("null");
+    var iT = charIDToTypeID("T   ");
+    var iO = charIDToTypeID("Ordn");
+    var iP = stringIDToTypeID("property");
+    var iTool = stringIDToTypeID("tool");
+    var iC = charIDToTypeID("capp");
+    var iG = charIDToTypeID("Trgt");
+    var iS = stringIDToTypeID("set");
+    var iE = stringIDToTypeID("exposure");
+
+    if (b.indexOf(p) !== 0 || d <= p.length) {
+        throw new Error("Unexpected file name: " + b);
+    }
+
+    c = b.substring(p.length, d);
+    k = m[c.charAt(0)];
+    u = c.substring(1);
+
+    if (!k || !u) {
+        throw new Error("Unexpected command: " + c);
+    }
+
+    function n(v, x) {
+        var l = 0;
+        var h = a.length - 1;
+        var r = v;
+        var q;
+
+        while (l <= h) {
+            q = Math.floor((l + h) / 2);
+            if ((x > 0 && a[q] > v) || (x < 0 && a[q] < v)) {
+                r = a[q];
+                if (x > 0) {
+                    h = q - 1;
+                } else {
+                    l = q + 1;
+                }
+            } else if (x > 0) {
+                l = q + 1;
+            } else {
+                h = q - 1;
+            }
+        }
+
+        return r;
+    }
+
+    function v(x) {
+        var y;
+
+        if (u === "+") {
+            return n(x, 1);
+        }
+        if (u === "-") {
+            return n(x, -1);
+        }
+
+        y = parseFloat(u);
+        if (isNaN(y)) {
+            throw new Error("Unexpected value: " + u);
+        }
+
+        return y;
+    }
+
+    function s(tr, o, id, val) {
+        var ad = new ActionDescriptor();
+        var ar = new ActionReference();
+
+        ar.putClass(tr);
+        ad.putReference(inull, ar);
+        o.putUnitDouble(id, iu, val);
+        ad.putObject(iT, iO, o);
+        executeAction(iS, ad, DialogModes.NO);
+    }
+
+    try {
+        var ar = new ActionReference();
+        var g;
+        var o;
+        var tr;
+        var id;
+        var x;
+
+        ar.putProperty(iP, iTool);
+        ar.putEnumerated(iC, iO, iG);
+        g = executeActionGet(ar);
+        o = g.getObjectValue(stringIDToTypeID("currentToolOptions"));
+        tr = g.getEnumerationType(iTool);
+        id = (t === "dodgeTool" || t === "burnInTool") ? iE : stringIDToTypeID(k);
+        x = o.getUnitDoubleValue(id);
+        s(tr, o, id, v(x));
+    } catch (e) {
+        $.writeln("Error: " + e.message);
+    }
+}
