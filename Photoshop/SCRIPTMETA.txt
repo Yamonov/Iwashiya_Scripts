@@ -42,4 +42,13 @@ Version=1
 Script-ID=org.iwashi.Photoshop_ToggleAllButBottom
 Version=1
 
+Script-ID=org.iwashi.toggleBrushesPalette
+Version=1
+
+Script-ID=org.iwashi.Clone_property_toggle
+Version=1
+
+Script-ID=org.iwashi.ColorPanel
+Version=1
+
 SCRIPTMETA-DIST-END
