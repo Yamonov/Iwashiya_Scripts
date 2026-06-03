@@ -9,4 +9,7 @@ Version=0.7
 Script-ID=org.iwashi.CMYKChannelCopies
 Version=0.5
 
+Script-ID=org.iwashi.OpenIllustratorLinksPanel
+Version=1
+
 SCRIPTMETA-DIST-END
