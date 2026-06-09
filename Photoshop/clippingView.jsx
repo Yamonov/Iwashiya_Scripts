@@ -3,15 +3,19 @@
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_ClippingView
 Version=1
-Release-Date=2026-03-23
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
+Name=クリッピング表示レイヤーグループ作成
+Author=Murakami Yoshiteru
+Release-Date=2026-03-23
 Target-App=Photoshop
+Edit-Password-SHA256=dd11a7f844bc4fc3:0ae4c79c57740cfe77e7dfd5dd59450bd38776a4ee7482f7abc02a031e490d74
 Description-BEGIN
 RGBドキュメントとCMYKドキュメントで実行すると、潰れるところを青、飛ぶところを赤で表示するレイヤーグループを最上部に作成します。
 もう一度実行すると非表示に、再度実行すると最上部に移動した上で表示状態になります。
 CMYKドキュメントでは総インキ量を指定できます。システム側にインストールされる「TotalInkPreview.icc」を使用します。
 Description-END
 SCRIPTMETA-END
+
 
 */
 

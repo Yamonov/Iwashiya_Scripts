@@ -51,4 +51,7 @@ Version=1
 Script-ID=org.iwashi.ColorPanel
 Version=1
 
+Script-ID=org.iwashi.StarLayerToggle
+Version=1
+
 SCRIPTMETA-DIST-END
