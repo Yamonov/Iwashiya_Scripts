@@ -54,4 +54,19 @@ Version=1
 Script-ID=org.iwashi.StarLayerToggle
 Version=1
 
+Script-ID=org.iwashi.FrequencySeparationFull.Comp
+Version=1
+
+Script-ID=org.iwashi.FSComp_toggle
+Version=1
+
+Script-ID=org.iwashi.FrequencySeparationSimple
+Version=1
+
+Script-ID=org.iwashi.FrequencySeparationFull
+Version=1
+
+Script-ID=org.iwashi.NoiseTexturePaint
+Version=1
+
 SCRIPTMETA-DIST-END
