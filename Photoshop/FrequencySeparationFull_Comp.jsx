@@ -533,12 +533,10 @@ SCRIPTMETA-END
 
         var groupNameMatch = rootGroup.name.match(fsGroupPattern);
         var nn = groupNameMatch[1];
-        var currentFsNumber = parseInt(nn, 10);
         var fsCompPattern = /^FS(\d+)[：:]/;
 
         for (var k = doc.layerComps.length - 1; k >= 0; k--) {
-            var compNameMatch = doc.layerComps[k].name.match(fsCompPattern);
-            if (compNameMatch && parseInt(compNameMatch[1], 10) <= currentFsNumber) {
+            if (fsCompPattern.test(doc.layerComps[k].name)) {
                 doc.layerComps[k].remove();
             }
         }
