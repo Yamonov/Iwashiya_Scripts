@@ -51,6 +51,9 @@ Version=1
 Script-ID=org.iwashi.ColorPanel
 Version=1
 
+Script-ID=org.iwashi.foregroundColor2SolidGray
+Version=1
+
 Script-ID=org.iwashi.StarLayerToggle
 Version=1
 
@@ -67,6 +70,9 @@ Script-ID=org.iwashi.FrequencySeparationFull
 Version=1
 
 Script-ID=org.iwashi.NoiseTexturePaint
+Version=1
+
+Script-ID=org.iwashi.NoiseTexturePaintSimple
 Version=1
 
 SCRIPTMETA-DIST-END
