@@ -4,7 +4,7 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.NoiseTexturePaintSimple
-Version=1
+Version=1.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=ノイズテクスチャ塗り
 Author=Murakami Yoshiteru
@@ -38,7 +38,21 @@ SCRIPTMETA-END
         return;
     }
 
-    runNoiseTexturePaintSimple();
+    runWithHistory("ノイズテクスチャ塗り", runNoiseTexturePaintSimple);
+
+    function runWithHistory(historyName, runner) {
+        var runnerName = "__iwashiNoiseTexturePaintSimpleHistoryRunner";
+        $.global[runnerName] = runner;
+        try {
+            app.activeDocument.suspendHistory(historyName, "$.global." + runnerName + "()");
+        } finally {
+            try {
+                delete $.global[runnerName];
+            } catch (e) {
+                $.global[runnerName] = null;
+            }
+        }
+    }
 
     function runNoiseTexturePaintSimple() {
         // 1. make / 作成: ノイズテクスチャ layer, Soft Light, clipped, neutral fill

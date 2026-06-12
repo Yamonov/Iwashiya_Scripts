@@ -5,7 +5,7 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.FrequencySeparationFull.Comp
-Version=1
+Version=1.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=周波数分離＋カンプ作成
 Author=Murakami Yoshiteru
@@ -40,8 +40,24 @@ SCRIPTMETA-END
         return;
     }
 
-    runFrequencySeparation();
-    createLayerCompsFromFrequencySeparation();
+    runWithHistory("周波数分離＋カンプ作成", function () {
+        runFrequencySeparation();
+        createLayerCompsFromFrequencySeparation();
+    });
+
+    function runWithHistory(historyName, runner) {
+        var runnerName = "__iwashiFrequencySeparationFullCompHistoryRunner";
+        $.global[runnerName] = runner;
+        try {
+            app.activeDocument.suspendHistory(historyName, "$.global." + runnerName + "()");
+        } finally {
+            try {
+                delete $.global[runnerName];
+            } catch (e) {
+                $.global[runnerName] = null;
+            }
+        }
+    }
 
     function runFrequencySeparation() {
         // 1. select / 選択範囲: front layer

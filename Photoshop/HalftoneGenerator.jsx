@@ -2,7 +2,7 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Halftone_Generator
-Version=1.1
+Version=1.2
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=Photoshopで疑似AMスクリーン生成
 Author=Murakami Yoshiteru
@@ -19,7 +19,7 @@ Description-END
 SCRIPTMETA-END
 */
 
-var scriptVersion = "Ver 1.1 (2025/12/23)";
+var scriptVersion = "Ver 1.2 (2026/06/12)";
 
 (function() {
 
@@ -215,6 +215,35 @@ var scriptVersion = "Ver 1.1 (2025/12/23)";
         doc.changeMode(ChangeMode.GRAYSCALE);
     }
 
+    function flattenDocumentIfNeeded(doc) {
+        try {
+            doc.flatten();
+        } catch (e) {
+            // 統合済みで flatten が不要な場合はスキップ
+        }
+    }
+
+    function runWithHistory(doc, historyName, runner) {
+        var runnerName = "__iwashiHalftoneGeneratorHistoryRunner";
+        app.activeDocument = doc;
+        $.global[runnerName] = runner;
+        try {
+            doc.suspendHistory(historyName, "$.global." + runnerName + "()");
+        } finally {
+            try {
+                delete $.global[runnerName];
+            } catch (e) {
+                $.global[runnerName] = null;
+            }
+        }
+    }
+
+    function makeBinarizeRunner(doc, setting, resolution) {
+        return function () {
+            binarizeChannel(doc, setting, resolution);
+        };
+    }
+
     function mergeCMYKChannels(docNames) {
         var desc = new ActionDescriptor();
         var list = new ActionList();
@@ -242,23 +271,25 @@ var scriptVersion = "Ver 1.1 (2025/12/23)";
     var resolution = screenSettings.resolution;
     var dupName = isGray ? outputName : (baseName + "_複製");
     var dup = doc.duplicate(dupName, true);
-    try {
-        dup.flatten();
-    } catch (e) {
-        // 統合済みで flatten が不要な場合はスキップ
-    }
-    app.activeDocument = dup;
     var splitDocs;
+    var binarizedDocs = [];
     if (isGray) {
+        runWithHistory(dup, "疑似AMスクリーン生成", function () {
+            flattenDocumentIfNeeded(dup);
+            binarizeChannel(dup, screenSettings[keys[0]], resolution);
+        });
         splitDocs = [dup];
     } else {
+        flattenDocumentIfNeeded(dup);
+        app.activeDocument = dup;
         splitDocs = dup.splitChannels();
-    }
 
-    var binarizedDocs = [];
-    for (var i = 0; i < keys.length; i++) {
-        binarizeChannel(splitDocs[i], screenSettings[keys[i]], resolution);
-        binarizedDocs.push(splitDocs[i]);
+        for (var i = 0; i < keys.length; i++) {
+            var channelDoc = splitDocs[i];
+            var channelSetting = screenSettings[keys[i]];
+            runWithHistory(channelDoc, "疑似AMスクリーン生成", makeBinarizeRunner(channelDoc, channelSetting, resolution));
+            binarizedDocs.push(channelDoc);
+        }
     }
 
     if (!isGray) {

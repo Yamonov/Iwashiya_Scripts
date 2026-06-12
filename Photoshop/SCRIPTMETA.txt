@@ -1,7 +1,7 @@
 SCRIPTMETA-DIST-BEGIN
 
 Script-ID=org.iwashi.Halftone_Generator
-Version=1.1
+Version=1.2
 
 Script-ID=org.iwashi.Photoshop_Illustrator_Crop
 Version=0.7
@@ -58,21 +58,21 @@ Script-ID=org.iwashi.StarLayerToggle
 Version=1
 
 Script-ID=org.iwashi.FrequencySeparationFull.Comp
-Version=1
+Version=1.1
 
 Script-ID=org.iwashi.FSComp_toggle
 Version=1
 
 Script-ID=org.iwashi.FrequencySeparationSimple
-Version=1
+Version=1.1
 
 Script-ID=org.iwashi.FrequencySeparationFull
-Version=1
+Version=1.1
 
 Script-ID=org.iwashi.NoiseTexturePaint
-Version=1
+Version=1.1
 
 Script-ID=org.iwashi.NoiseTexturePaintSimple
-Version=1
+Version=1.1
 
 SCRIPTMETA-DIST-END

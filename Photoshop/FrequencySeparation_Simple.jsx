@@ -4,7 +4,7 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.FrequencySeparationSimple
-Version=1
+Version=1.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=テクスチャ分離シンプル
 Author=Murakami Yoshiteru
@@ -36,7 +36,21 @@ SCRIPTMETA-END
         return;
     }
 
-    runFrequencySeparationSimple();
+    runWithHistory("テクスチャ分離シンプル", runFrequencySeparationSimple);
+
+    function runWithHistory(historyName, runner) {
+        var runnerName = "__iwashiFrequencySeparationSimpleHistoryRunner";
+        $.global[runnerName] = runner;
+        try {
+            app.activeDocument.suspendHistory(historyName, "$.global." + runnerName + "()");
+        } finally {
+            try {
+                delete $.global[runnerName];
+            } catch (e) {
+                $.global[runnerName] = null;
+            }
+        }
+    }
 
     function runFrequencySeparationSimple() {
         // 1. select / 選択範囲: front layer

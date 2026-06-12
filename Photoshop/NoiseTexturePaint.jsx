@@ -4,7 +4,7 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.NoiseTexturePaint
-Version=1
+Version=1.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=テクスチャ塗り
 Author=Murakami Yoshiteru
@@ -43,7 +43,21 @@ SCRIPTMETA-END
         return;
     }
 
-    runNoiseTexturePaint();
+    runWithHistory("テクスチャ塗り", runNoiseTexturePaint);
+
+    function runWithHistory(historyName, runner) {
+        var runnerName = "__iwashiNoiseTexturePaintHistoryRunner";
+        $.global[runnerName] = runner;
+        try {
+            app.activeDocument.suspendHistory(historyName, "$.global." + runnerName + "()");
+        } finally {
+            try {
+                delete $.global[runnerName];
+            } catch (e) {
+                $.global[runnerName] = null;
+            }
+        }
+    }
 
     function runNoiseTexturePaint() {
         // 1. select / 選択範囲: front layer

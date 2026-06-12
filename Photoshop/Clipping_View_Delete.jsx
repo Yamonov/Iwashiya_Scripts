@@ -9,10 +9,9 @@ Author=Murakami Yoshiteru
 Release-Date=2026-05-18
 Target-App=Photoshop
 Edit-Password-SHA256=XuQlCwV1t7x0Dxf6:27ff384138df6c038ba4cf81b26e35fffe3db5a94715ec922acce0882cc76f84
-Description-BEGIN
-「クリッピング表示」で作成したレイヤーグループを、内部レイヤー構成を確認してから削除します。
-Description-END
+Description=「クリッピング表示」で作成したレイヤーグループを、内部レイヤー構成を確認してから削除します。
 SCRIPTMETA-END
+
 
 */
 
