@@ -75,4 +75,7 @@ Version=1.1
 Script-ID=org.iwashi.NoiseTexturePaintSimple
 Version=1.1
 
+Script-ID=org.iwashi.CCLibPanelToggle
+Version=0.5
+    
 SCRIPTMETA-DIST-END
