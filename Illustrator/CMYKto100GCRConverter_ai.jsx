@@ -3,11 +3,11 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
-Version=2.1.6
+Version=2.1.7
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=色を変えずにCMYK値を300%以下にする
 Author=Murakami Yoshiteru
-Release-Date=2026-06-11
+Release-Date=2026-06-17
 Target-App=Illustrator
 Edit-Password-SHA256=oS5aCLoTCKedGLZN:3d8282cb048f8c02d5bf1dca0493471b70fda75c2a3131e4cb0c10b4c1688127
 Description-BEGIN
@@ -50,14 +50,15 @@ function formatScriptVersion(meta) {
 }
 
 var YamoScriptVersion = formatScriptVersion(readSelfHeaderMeta());
-var YAMO_LOCALE_OVERRIDE = ""; // テスト時のみ "ja" または "en" を指定
+// var YAMO_LOCALE_OVERRIDE = "en"; // テスト時のみ "ja" または "en" を指定
 
 var UI_TEXT = {
     progressTitle: { ja: "CMYK値を整理中...", en: "Adjusting CMYK..." },
-    scanningSelection: { ja: "処理対象を調査中...", en: "Checking selection..." },
+    scanningSelection: { ja: "対象を調査中...", en: "Checking selection..." },
     optionsTitle: { ja: "変換オプション", en: "Conversion Options" },
     titleSeparator: { ja: "　｜　", en: " | " },
-    targetCount: { ja: "処理対象数", en: "Colors to process" },
+    targetCount: { ja: "対象数{count}", en: "Targets {count}" },
+    unsupportedCount: { ja: "（未対応{count}）", en: " (unsupported {count})" },
     estimateTime: { ja: "予測時間", en: "Estimated time" },
     estimateHelp: {
         ja: "使用色数とキャッシュ利用数で変わるため、目安です。キャッシュ利用率20%程度で計算しています。",
@@ -68,19 +69,20 @@ var UI_TEXT = {
         ja: "色相を保ったままLabのa*とb*を拡大し、彩度を上げます。",
         en: "Increases saturation by expanding Lab a* and b* while preserving hue."
     },
-    saturationAmount: { ja: "  彩度", en: "  Amount" },
+    saturationAmount: { ja: "彩度", en: "Amount" },
     saturationAmountHelp: { ja: "彩度を上げる割合です。", en: "Saturation increase amount." },
     kTaper: { ja: "墨濁り低減", en: "Reduce K muddiness" },
     kTaperHelp: {
         ja: "Kを開始％から終了％まで段階的に減らし、削減分をCMYで調整します。",
         en: "Gradually reduces K from the start value to the end value and compensates with CMY."
     },
-    kReduceStart: { ja: "  K削減開始", en: "  K start" },
+    kReduceStart: { ja: "K削減開始", en: "K start" },
     kReduceStartHelp: { ja: "この値以下のKを0にします。", en: "K at or below this value is set to 0." },
     kReduceEndHelp: {
         ja: "この値以上のKは変更せず、この値未満を段階的に減らします。",
         en: "K at or above this value is unchanged. Lower values are reduced gradually."
     },
+    kRangeSeparator: { ja: "から", en: "to" },
     moreGrayK: { ja: "より多くのグレイを墨版にする", en: "Convert more gray to black plate" },
     moreGrayKHelp: {
         ja: "低彩度のグレーカラーでCMYを減らし、墨版中心の構成に近づけます。",
@@ -91,20 +93,21 @@ var UI_TEXT = {
     requireSelection: { ja: "選択してから実行してください", en: "Select objects before running this script." },
     done: { ja: "完了", en: "Done" },
     selectedObjects: { ja: "選択オブジェクト数", en: "Selected objects" },
-    processedColors: { ja: "処理色数", en: "Processed colors" },
+    updatedColors: { ja: "変更色数", en: "Updated colors" },
     processingTime: { ja: "処理時間", en: "Processing time" },
-    cacheRate: { ja: "キャッシュ利用率", en: "Cache use rate" },
+    cacheHitRate: { ja: "キャッシュヒット率", en: "Cache hit rate" },
     skippedCount: { ja: "未適用件数", en: "Skipped items" },
     secondsUnit: { ja: "秒", en: "sec" },
     timeSeconds: { ja: "約{sec}秒", en: "about {sec} sec" },
     timeMinutes: { ja: "約{min}分", en: "about {min} min" },
     timeMinutesSeconds: { ja: "約{min}分{sec}秒", en: "about {min} min {sec} sec" },
     timeHours: { ja: "約{hour}時間", en: "about {hour} hr" },
-    timeHoursMinutes: { ja: "約{hour}時間{min}分", en: "about {hour} hr {min} min" }
+    timeHoursMinutes: { ja: "約{hour}時間{min}分", en: "about {hour} hr {min} min" },
+    undefinedCMYKPattern: { ja: "未定義のCMYKパターンです: ", en: "Undefined CMYK pattern: " }
 };
 
 function currentLocaleCode() {
-    var raw = YAMO_LOCALE_OVERRIDE || $.locale || "";
+    var raw = (typeof YAMO_LOCALE_OVERRIDE !== "undefined" ? YAMO_LOCALE_OVERRIDE : "") || $.locale || "";
     raw = String(raw).toLowerCase();
     if (!raw) return "ja";
     return raw.indexOf("ja") === 0 ? "ja" : "en";
@@ -350,7 +353,17 @@ function setStaticTextRed(st) {
 }
 
 // 「変換オプション」ダイアログ
-function showConvertOptionsDialog(pathCount) {
+function formatTargetCountText(targetCount, unsupportedCount) {
+    var s = uiFormat('targetCount', { count: targetCount });
+    if (unsupportedCount > 0) {
+        s += uiFormat('unsupportedCount', { count: unsupportedCount });
+    }
+    return s;
+}
+
+function showConvertOptionsDialog(stats) {
+    var targetCount = stats.selectedObjectCount + stats.unsupportedObjectCount;
+    var plannedCount = stats.planned;
     var dlg = new Window('dialog', uiText('optionsTitle') + uiText('titleSeparator') + dialogVersionText());
     dlg.orientation = 'column';
     dlg.alignChildren = 'fill';
@@ -358,12 +371,18 @@ function showConvertOptionsDialog(pathCount) {
     // 対象パス数と予測時間
     var infoGroup = dlg.add('group');
     infoGroup.orientation = 'row';
-    infoGroup.alignChildren = 'center';
-    infoGroup.add('statictext', undefined, uiText('targetCount') + ': ' + pathCount);
-    infoGroup.add('statictext', [0, 0, 36, 18], '');
+    infoGroup.alignment = 'fill';
+    infoGroup.alignChildren = ['left', 'center'];
+    var targetCountText = infoGroup.add('statictext', undefined, formatTargetCountText(targetCount, stats.unsupportedObjectCount));
+    targetCountText.alignment = ['left', 'center'];
+    targetCountText.justify = 'left';
+    var infoSpacer = infoGroup.add('statictext', undefined, '');
+    infoSpacer.alignment = ['fill', 'center'];
 
-    var estimateSec = estimateProcessingSeconds(pathCount);
+    var estimateSec = estimateProcessingSeconds(plannedCount);
     var estimateText = infoGroup.add('statictext', undefined, uiText('estimateTime') + ': ' + formatEstimatedTime(estimateSec));
+    estimateText.alignment = ['right', 'center'];
+    estimateText.justify = 'right';
     estimateText.helpTip = uiText('estimateHelp');
     if (estimateSec >= 60) setStaticTextRed(estimateText);
 
@@ -372,37 +391,52 @@ function showConvertOptionsDialog(pathCount) {
     kPanel.alignChildren = 'left';
     kPanel.orientation = 'column';
 
+    var optionCheckboxWidth = 158;
+    var optionLabelWidth = 72;
+    var optionDropdownWidth = 54;
+    var optionRangeSeparatorWidth = 34;
+
     var satGroup = kPanel.add('group');
     satGroup.orientation = 'row';
     var chkSatBoost = satGroup.add('checkbox', undefined, uiText('saturationBoost'));
+    chkSatBoost.preferredSize.width = optionCheckboxWidth;
     chkSatBoost.value = false;
     chkSatBoost.helpTip = uiText('saturationBoostHelp');
-    var labelSat = satGroup.add('statictext', [0, 0, 42, 18], uiText('saturationAmount'));
-    var ddSat = satGroup.add('dropdownlist', undefined, ['10', '20', '30']);
+    var labelSat = satGroup.add('statictext', [0, 0, optionLabelWidth, 18], uiText('saturationAmount'));
+    labelSat.justify = 'right';
+    var ddSat = satGroup.add('dropdownlist', undefined, ['10%', '20%', '30%']);
+    ddSat.preferredSize.width = optionDropdownWidth + 10;
     ddSat.selection = 0; // デフォルトは 10%
     ddSat.helpTip = uiText('saturationAmountHelp');
-    var labelSatPct = satGroup.add('statictext', [0, 0, 14, 18], '%');
-    var satToggleTargets = [labelSat, ddSat, labelSatPct];
+    var satToggleTargets = [labelSat, ddSat];
 
     // 墨濁り低減チェックとK削減開始/終了オプションを1行にまとめる
     var optGroup = kPanel.add('group');
     optGroup.orientation = 'row';
     var chkSaturation = optGroup.add('checkbox', undefined, uiText('kTaper'));
+    chkSaturation.preferredSize.width = optionCheckboxWidth;
     chkSaturation.value = false; // 初期値はOFF
     chkSaturation.helpTip = uiText('kTaperHelp');
 
     // K削減開始/終了オプション（1行にまとめる）
-    var labelK = optGroup.add('statictext', [0, 0, 70, 18], uiText('kReduceStart'));
-    var ddK = optGroup.add('dropdownlist', undefined, ['3', '5', '10', '15']);
+    var labelK = optGroup.add('statictext', [0, 0, optionLabelWidth, 18], uiText('kReduceStart'));
+    labelK.justify = 'right';
+    var kRangeGroup = optGroup.add('group');
+    kRangeGroup.orientation = 'row';
+    kRangeGroup.alignChildren = ['left', 'center'];
+    kRangeGroup.margins = 0;
+    kRangeGroup.spacing = 0;
+    var ddK = kRangeGroup.add('dropdownlist', undefined, ['3%', '5%', '10%', '15%']);
+    ddK.preferredSize.width = optionDropdownWidth + 10;
     ddK.selection = 1; // デフォルトは 5%
     ddK.helpTip = uiText('kReduceStartHelp');
-    optGroup.add('statictext', [0, 0, 18, 18], '〜');
-    var labelKEnd = optGroup.add('statictext', undefined, '');
-    var ddKEnd = optGroup.add('dropdownlist', undefined, ['20', '30', '40', '50', '60']);
+    var labelKRangeSeparator = kRangeGroup.add('statictext', [0, 0, optionRangeSeparatorWidth, 18], uiText('kRangeSeparator'));
+    labelKRangeSeparator.justify = 'center';
+    var ddKEnd = kRangeGroup.add('dropdownlist', undefined, ['20%', '30%', '40%', '50%', '60%']);
+    ddKEnd.preferredSize.width = optionDropdownWidth + 10;
     ddKEnd.selection = 0; // デフォルトは 20%
     ddKEnd.helpTip = uiText('kReduceEndHelp');
-    var labelPctEnd = optGroup.add('statictext', [0, 0, 14, 18], '%');
-    var toggleTargets = [labelK, ddK, labelKEnd, ddKEnd, labelPctEnd];
+    var toggleTargets = [labelK, ddK, labelKRangeSeparator, ddKEnd];
 
     var grayKGroup = kPanel.add('group');
     grayKGroup.orientation = 'row';
@@ -937,7 +971,7 @@ function refineKOnly(targetLab) {
 function getDirectPatternInfo(pattern) {
     var info = DIRECT_PATTERN_INFO[pattern];
     if (info) return info;
-    throw "未定義のCMYKパターンです: " + pattern;
+    throw uiText('undefinedCMYKPattern') + pattern;
 }
 
 function makeDirectPatternSeed(inputCMYK, info) {
@@ -1574,7 +1608,7 @@ function processPageItemColors(item, filled, stroked) {
     };
 }
 
-function walkSelectionArtItems(visitor) {
+function walkSelectionArtItems(visitor, unsupportedVisitor) {
     var doc = app.activeDocument;
     var sel = doc.selection;
     if (!sel || sel.length === 0) return false;
@@ -1583,13 +1617,23 @@ function walkSelectionArtItems(visitor) {
         if (!it) return;
         var tn = it.typename;
         if (tn === 'GroupItem') {
-            var arr = it.pageItems;
-            for (var i = 0, n = arr.length; i < n; i++) walk(arr[i]);
+            try {
+                var arr = it.pageItems;
+                for (var i = 0, n = arr.length; i < n; i++) walk(arr[i]);
+            } catch (e) {
+                if (unsupportedVisitor) unsupportedVisitor(it);
+            }
         } else if (tn === 'CompoundPathItem') {
-            var arr2 = it.pathItems;
-            for (var j = 0, n2 = arr2.length; j < n2; j++) walk(arr2[j]);
-        } else if (tn === 'TextFrame' || tn === 'PathItem' || tn === 'MeshItem') {
+            try {
+                var arr2 = it.pathItems;
+                for (var j = 0, n2 = arr2.length; j < n2; j++) walk(arr2[j]);
+            } catch (e2) {
+                if (unsupportedVisitor) unsupportedVisitor(it);
+            }
+        } else if (tn === 'TextFrame' || tn === 'PathItem') {
             visitor(it);
+        } else if (unsupportedVisitor) {
+            unsupportedVisitor(it);
         }
     }
     for (var i = 0, nSel = sel.length; i < nSel; i++) walk(sel[i]);
@@ -1698,6 +1742,7 @@ function validateActiveDocument() {
 function collectSelectionStats(showStatusWindow) {
     var planned = 0;
     var selectedObjectCount = 0;
+    var unsupportedObjectCount = 0;
     var items = [];
     var statusWindow = showStatusWindow ? createStatusWindow(uiText('scanningSelection'), 200) : null;
     try {
@@ -1707,12 +1752,16 @@ function collectSelectionStats(showStatusWindow) {
             selectedObjectCount++;
             planned += entry.attempts;
             if (statusWindow) statusWindow.tick();
+        }, function () {
+            unsupportedObjectCount++;
+            if (statusWindow) statusWindow.tick();
         });
     } catch (e) { }
     if (statusWindow) statusWindow.close();
     return {
         planned: planned,
         selectedObjectCount: selectedObjectCount,
+        unsupportedObjectCount: unsupportedObjectCount,
         items: items
     };
 }
@@ -1726,9 +1775,9 @@ function buildResultMessage(selectedObjectCount, plannedCount, appliedInfo, tota
     var msg = [];
     msg.push(uiText('done'));
     msg.push(uiText('selectedObjects') + ": " + selectedObjectCount);
-    msg.push(uiText('processedColors') + ": " + appliedInfo.count);
+    msg.push(uiText('updatedColors') + ": " + appliedInfo.count);
     msg.push(uiText('processingTime') + ": " + round2(totalSec) + " " + uiText('secondsUnit'));
-    msg.push(uiText('cacheRate') + ": " + formatPercent(cacheHitCount, plannedCount));
+    msg.push(uiText('cacheHitRate') + ": " + formatPercent(cacheHitCount, plannedCount));
     if (gSkipCount > 0) {
         msg.push(uiText('skippedCount') + ": " + gSkipCount);
     }
@@ -1777,7 +1826,7 @@ function cleanupAfterRun() {
 
         var stats = collectSelectionStats(true);
 
-        var opt = showConvertOptionsDialog(stats.planned);
+        var opt = showConvertOptionsDialog(stats);
         if (!opt || !opt.ok) {
             // ユーザーがキャンセルした場合は処理を中止
             return;
