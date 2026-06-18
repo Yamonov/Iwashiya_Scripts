@@ -3,18 +3,17 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
-Version=2.1.7
+Version=2.1.8
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
-Name=色を変えずにCMYK値を300%以下にする
+Name=色を変えずにCMYK値を調整
 Author=Murakami Yoshiteru
-Release-Date=2026-06-17
+Release-Date=2026-06-18
 Target-App=Illustrator
 Edit-Password-SHA256=oS5aCLoTCKedGLZN:3d8282cb048f8c02d5bf1dca0493471b70fda75c2a3131e4cb0c10b4c1688127
 Description-BEGIN
 ・選択したCMYKオブジェクトのカラーを、発色を維持しつつ、印刷でのブレが少ないカラー、CMYのうち１〜２版（＋K）の値に整理します。
 ・彩度調整オプションで、仕上がりの彩度を上げられます。
-・墨濁り低減オプションで、墨が濃い印刷向けに薄い色からKを減らせます。
-・グレーを墨版オプションは、ハイライト側から積極的にグレーに近い色を墨版に置き換えます。
+・K量の調整オプションで、Kを減らす方向または増やす方向へ段階的に寄せられます。増やすとより多くのグレートーンがKのみに、減らすとCMYからKを抜いてK濁りを抑えます。
 ・グローバルスウォッチ、グラデーションにも対応しています。
 
 ■注意！
@@ -49,8 +48,14 @@ function formatScriptVersion(meta) {
     return "Ver " + meta.version + " (" + meta.releaseDate + ")";
 }
 
-var YamoScriptVersion = formatScriptVersion(readSelfHeaderMeta());
-// var YAMO_LOCALE_OVERRIDE = "en"; // テスト時のみ "ja" または "en" を指定
+function formatScriptVersionOnly(meta) {
+    return meta.version ? "Ver " + meta.version : "";
+}
+
+var YamoScriptMeta = readSelfHeaderMeta();
+var YamoScriptVersion = formatScriptVersion(YamoScriptMeta);
+var YamoScriptVersionOnly = formatScriptVersionOnly(YamoScriptMeta);
+//var YAMO_LOCALE_OVERRIDE = "ja"; // テスト時のみ "ja" または "en" を指定
 
 var UI_TEXT = {
     progressTitle: { ja: "CMYK値を整理中...", en: "Adjusting CMYK..." },
@@ -59,6 +64,11 @@ var UI_TEXT = {
     titleSeparator: { ja: "　｜　", en: " | " },
     targetCount: { ja: "対象数{count}", en: "Targets {count}" },
     unsupportedCount: { ja: "（未対応{count}）", en: " (unsupported {count})" },
+    targetCountHelp: {
+        ja: "対象数は、処理対象と未対応オブジェクトの合計です。未対応例: グラデーションメッシュ、ブレンド、ラスタ画像/配置画像、シンボル、グラフ、その他プラグイン/特殊オブジェクトなど。",
+        en: "Targets include processable and unsupported objects. Unsupported examples: gradient meshes, blends, raster/placed images, symbols, graphs, and other plugin or special objects."
+    },
+    info: { ja: "情報", en: "Info" },
     estimateTime: { ja: "予測時間", en: "Estimated time" },
     estimateHelp: {
         ja: "使用色数とキャッシュ利用数で変わるため、目安です。キャッシュ利用率20%程度で計算しています。",
@@ -71,22 +81,19 @@ var UI_TEXT = {
     },
     saturationAmount: { ja: "彩度", en: "Amount" },
     saturationAmountHelp: { ja: "彩度を上げる割合です。", en: "Saturation increase amount." },
-    kTaper: { ja: "墨濁り低減", en: "Reduce K muddiness" },
-    kTaperHelp: {
-        ja: "Kを開始％から終了％まで段階的に減らし、削減分をCMYで調整します。",
-        en: "Gradually reduces K from the start value to the end value and compensates with CMY."
+    cmyKBalance: { ja: "CMY/Kバランスを調整", en: "Adjust CMY/K balance" },
+    cmyKBalanceHelp: {
+        ja: "K量をスライダで調整します。左はKを減らしてCMYで補完し、右はCMYを減らしてKで補完します。中央から動かすほど変換結果に許容する色差が大きくなります。",
+        en: "Adjusts the K amount with the slider. Left reduces K and compensates with CMY; right reduces CMY and compensates with K. The farther the slider moves from center, the larger the allowed color difference becomes."
     },
-    kReduceStart: { ja: "K削減開始", en: "K start" },
-    kReduceStartHelp: { ja: "この値以下のKを0にします。", en: "K at or below this value is set to 0." },
-    kReduceEndHelp: {
-        ja: "この値以上のKは変更せず、この値未満を段階的に減らします。",
-        en: "K at or above this value is unchanged. Lower values are reduced gradually."
+    allowedColorDifference: { ja: "最大許容色差", en: "Max allowed color difference" },
+    allowedColorDifferenceHelp: {
+        ja: "上の数値はスライダ位置ごとの⊿E76での許容色差です。中央は変更なし、左右に動かすほど色差を大きく許容します。",
+        en: "The values above show the allowed color difference in Delta E 76 for each slider position. Center leaves the result unchanged; moving left or right allows a larger color difference."
     },
-    kRangeSeparator: { ja: "から", en: "to" },
-    moreGrayK: { ja: "より多くのグレイを墨版にする", en: "Convert more gray to black plate" },
-    moreGrayKHelp: {
-        ja: "低彩度のグレーカラーでCMYを減らし、墨版中心の構成に近づけます。",
-        en: "Reduces CMY in low-saturation grays and moves them closer to black-plate output."
+    cmyKBalanceSliderHelp: {
+        ja: "中央は変更なしです。K-側はKを減らしてCMYで補完し、K+側はCMYを減らしてKで補完します。中央から動かすほど、⊿E76での許容色差が大きくなります。",
+        en: "Center leaves the result unchanged. K- reduces K and compensates with CMY; K+ reduces CMY and compensates with K. The farther the slider moves from center, the larger the allowed color difference in Delta E 76 becomes."
     },
     cancel: { ja: "キャンセル", en: "Cancel" },
     requireCMYK: { ja: "CMYKドキュメントで実行してください", en: "Run this script in a CMYK document." },
@@ -128,12 +135,17 @@ function uiFormat(key, values) {
     return s;
 }
 
+function saturationBoostDropdownItems() {
+    var suffix = currentLocaleCode() === "ja" ? "上げ" : " UP";
+    return ['10%' + suffix, '20%' + suffix, '30%' + suffix];
+}
+
 //-----------------------------------------------------
 // 最小二乗補正
 var LS_JACOBIAN_STEP = 1.0; // 数値ヤコビアンの微小ステップ（%）
 var LS_LAMBDA = 0.1; // 最小二乗の正則化
 var LS_PIVOT_EPS = 1e-12; // 最小二乗の特異判定
-var K_TAPER_CHANGE_EPS = 0.01; // K削減後に再計算する最小変化量
+var CMY_K_BALANCE_CHANGE_EPS = 0.01; // バランス補正後に再計算する最小変化量
 
 // 直接探索
 var DIRECT_REFINE_STEPS = [20, 10, 5, 2, 1];
@@ -163,24 +175,25 @@ var LAB_CACHE_MAX_ENTRIES = 125; // Lab変換キャッシュの件数上限
 // 最終丸め
 var ZERO_THR = 3; // ≤ ZERO_THR → 0
 
-// K削減オプション（後処理）
-var DEFAULT_K_TAPER_ENABLED = false;
-var DEFAULT_K_REDUCE_START = 5;
-var DEFAULT_K_REDUCE_END = 20;
+// CMY/Kバランスオプション（後処理）
+var DEFAULT_CMY_K_BALANCE_ENABLED = false;
+var DEFAULT_CMY_K_BALANCE_VALUE = 0;
+var CMY_K_BALANCE_CURVE = 2.4;
+var CMY_K_BALANCE_DE_BASE = 1.5;
+var CMY_K_BALANCE_DE_RANGE = 8.5;
+var CMY_K_BALANCE_REFINE_PASSES = 4;
+var CMY_K_BALANCE_K_REDUCTION_FACTORS = [1.0, 0.75, 0.5, 0.33, 0.2, 0.1, 0.05];
 var DEFAULT_SATURATION_BOOST_ENABLED = false;
 var DEFAULT_SATURATION_BOOST_PCT = 5;
-var DEFAULT_MORE_GRAY_TO_K_ONLY_ENABLED = false;
 var ESTIMATE_FIXED_SECONDS = 3.2;
 var ESTIMATE_UNCACHED_SECONDS_PER_COLOR = 0.0035;
 var ESTIMATE_CACHED_SECONDS_PER_COLOR = 0.00021;
 var ESTIMATE_ASSUMED_CACHE_RATE = 0.2;
 var SATURATION_BOOST_FULL_CHROMA = 20; // C*ab がこの値以上なら指定どおりの彩度補正
-var K_TAPER_ENABLED = DEFAULT_K_TAPER_ENABLED; // ScriptUIで「墨濁り低減」がオンのときに有効化
-var K_REDUCE_START = DEFAULT_K_REDUCE_START; // Kがこの値以下なら強制的に0に（ScriptUIで変更）
-var K_REDUCE_END = DEFAULT_K_REDUCE_END; // Kがこの値以上なら変更しない（ScriptUIで変更）
+var CMY_K_BALANCE_ENABLED = DEFAULT_CMY_K_BALANCE_ENABLED; // ScriptUIで「CMYとKのバランス」がオンのときに有効化
+var CMY_K_BALANCE_VALUE = DEFAULT_CMY_K_BALANCE_VALUE; // -100..100、負はCMY寄り、正はK寄り
 var SATURATION_BOOST_ENABLED = DEFAULT_SATURATION_BOOST_ENABLED; // ScriptUIで「彩度補正」がオンのときに有効化
 var SATURATION_BOOST_PCT = DEFAULT_SATURATION_BOOST_PCT; // a*, b* をこの割合だけ拡大
-var MORE_GRAY_TO_K_ONLY_ENABLED = DEFAULT_MORE_GRAY_TO_K_ONLY_ENABLED; // 低彩度グレーでK-only候補を広げる
 
 var CMYK_CHANNELS = ['c', 'm', 'y', 'k'];
 var DIRECT_PATTERN_INFO = {
@@ -311,8 +324,23 @@ function readDropdownInt(dropdown, fallback) {
     return isNaN(value) ? fallback : value;
 }
 
+function readSliderInt(slider, fallback) {
+    if (!slider) return fallback;
+    var value = Math.round(Number(slider.value));
+    return isNaN(value) ? fallback : value;
+}
+
+function snapToStep(value, step, minValue, maxValue) {
+    var n = Number(value);
+    if (isNaN(n)) n = 0;
+    var snapped = Math.round(n / step) * step;
+    if (snapped < minValue) snapped = minValue;
+    if (snapped > maxValue) snapped = maxValue;
+    return snapped;
+}
+
 function dialogVersionText() {
-    return String(YamoScriptVersion);
+    return String(YamoScriptVersionOnly);
 }
 
 function estimateProcessingSeconds(count) {
@@ -352,6 +380,12 @@ function setStaticTextRed(st) {
     } catch (e) { }
 }
 
+function setStaticTextMuted(st) {
+    try {
+        st.graphics.foregroundColor = st.graphics.newPen(st.graphics.PenType.SOLID_COLOR, [0.55, 0.55, 0.55], 1);
+    } catch (e) { }
+}
+
 // 「変換オプション」ダイアログ
 function formatTargetCountText(targetCount, unsupportedCount) {
     var s = uiFormat('targetCount', { count: targetCount });
@@ -364,97 +398,180 @@ function formatTargetCountText(targetCount, unsupportedCount) {
 function showConvertOptionsDialog(stats) {
     var targetCount = stats.selectedObjectCount + stats.unsupportedObjectCount;
     var plannedCount = stats.planned;
-    var dlg = new Window('dialog', uiText('optionsTitle') + uiText('titleSeparator') + dialogVersionText());
+    var dialogMinWidth = 280;
+    var dlg = new Window('dialog', uiText('optionsTitle'));
     dlg.orientation = 'column';
     dlg.alignChildren = 'fill';
+    dlg.preferredSize.width = dialogMinWidth;
 
-    // 対象パス数と予測時間
-    var infoGroup = dlg.add('group');
-    infoGroup.orientation = 'row';
-    infoGroup.alignment = 'fill';
-    infoGroup.alignChildren = ['left', 'center'];
-    var targetCountText = infoGroup.add('statictext', undefined, formatTargetCountText(targetCount, stats.unsupportedObjectCount));
-    targetCountText.alignment = ['left', 'center'];
-    targetCountText.justify = 'left';
-    var infoSpacer = infoGroup.add('statictext', undefined, '');
-    infoSpacer.alignment = ['fill', 'center'];
-
-    var estimateSec = estimateProcessingSeconds(plannedCount);
-    var estimateText = infoGroup.add('statictext', undefined, uiText('estimateTime') + ': ' + formatEstimatedTime(estimateSec));
-    estimateText.alignment = ['right', 'center'];
-    estimateText.justify = 'right';
-    estimateText.helpTip = uiText('estimateHelp');
-    if (estimateSec >= 60) setStaticTextRed(estimateText);
-
-    // 調整オプションをまとめたパネル
-    var kPanel = dlg.add('panel');
-    kPanel.alignChildren = 'left';
-    kPanel.orientation = 'column';
-
-    var optionCheckboxWidth = 158;
-    var optionLabelWidth = 72;
+    var optionPanelWidth = dialogMinWidth - 36;
+    var optionPanelMargins = [8, 18, 28, 14];
+    var infoPanelMargins = [8, 18, 8, 14];
     var optionDropdownWidth = 54;
-    var optionRangeSeparatorWidth = 34;
+    var balanceSideLabelWidth = 36;
+    var balanceSliderWidth = 146;
+    var balanceSliderStep = 50;
+    var allowedColorDifferenceLabelExtraWidth = 72;
 
-    var satGroup = kPanel.add('group');
+    var satPanel = dlg.add('panel', undefined, uiText('saturationBoost'));
+    satPanel.alignment = 'fill';
+    satPanel.alignChildren = ['left', 'center'];
+    satPanel.orientation = 'column';
+    satPanel.preferredSize.width = optionPanelWidth;
+    satPanel.margins = optionPanelMargins;
+    satPanel.helpTip = uiText('saturationBoostHelp');
+
+    var satGroup = satPanel.add('group');
     satGroup.orientation = 'row';
-    var chkSatBoost = satGroup.add('checkbox', undefined, uiText('saturationBoost'));
-    chkSatBoost.preferredSize.width = optionCheckboxWidth;
+    satGroup.alignment = 'left';
+    satGroup.alignChildren = ['left', 'center'];
+    satGroup.margins = 0;
+    satGroup.spacing = 8;
+    var chkSatBoost = satGroup.add('checkbox', undefined, uiText('saturationAmount'));
     chkSatBoost.value = false;
     chkSatBoost.helpTip = uiText('saturationBoostHelp');
-    var labelSat = satGroup.add('statictext', [0, 0, optionLabelWidth, 18], uiText('saturationAmount'));
-    labelSat.justify = 'right';
-    var ddSat = satGroup.add('dropdownlist', undefined, ['10%', '20%', '30%']);
-    ddSat.preferredSize.width = optionDropdownWidth + 10;
+    var satDropdownGroup = satGroup.add('group');
+    satDropdownGroup.orientation = 'row';
+    satDropdownGroup.alignChildren = ['left', 'center'];
+    satDropdownGroup.margins = [0, -4, 0, 0];
+    var ddSat = satDropdownGroup.add('dropdownlist', undefined, saturationBoostDropdownItems());
+    ddSat.preferredSize.width = optionDropdownWidth + 30;
+    ddSat.preferredSize.height = 20;
     ddSat.selection = 0; // デフォルトは 10%
     ddSat.helpTip = uiText('saturationAmountHelp');
-    var satToggleTargets = [labelSat, ddSat];
+    var satToggleTargets = [ddSat];
 
-    // 墨濁り低減チェックとK削減開始/終了オプションを1行にまとめる
-    var optGroup = kPanel.add('group');
-    optGroup.orientation = 'row';
-    var chkSaturation = optGroup.add('checkbox', undefined, uiText('kTaper'));
-    chkSaturation.preferredSize.width = optionCheckboxWidth;
-    chkSaturation.value = false; // 初期値はOFF
-    chkSaturation.helpTip = uiText('kTaperHelp');
+    var balancePanel = dlg.add('panel', undefined, uiText('cmyKBalance'));
+    balancePanel.alignment = 'fill';
+    balancePanel.orientation = 'column';
+    balancePanel.alignChildren = ['left', 'center'];
+    balancePanel.preferredSize.width = optionPanelWidth;
+    balancePanel.margins = optionPanelMargins;
+    balancePanel.spacing = 4;
+    balancePanel.helpTip = uiText('cmyKBalanceHelp');
 
-    // K削減開始/終了オプション（1行にまとめる）
-    var labelK = optGroup.add('statictext', [0, 0, optionLabelWidth, 18], uiText('kReduceStart'));
-    labelK.justify = 'right';
-    var kRangeGroup = optGroup.add('group');
-    kRangeGroup.orientation = 'row';
-    kRangeGroup.alignChildren = ['left', 'center'];
-    kRangeGroup.margins = 0;
-    kRangeGroup.spacing = 0;
-    var ddK = kRangeGroup.add('dropdownlist', undefined, ['3%', '5%', '10%', '15%']);
-    ddK.preferredSize.width = optionDropdownWidth + 10;
-    ddK.selection = 1; // デフォルトは 5%
-    ddK.helpTip = uiText('kReduceStartHelp');
-    var labelKRangeSeparator = kRangeGroup.add('statictext', [0, 0, optionRangeSeparatorWidth, 18], uiText('kRangeSeparator'));
-    labelKRangeSeparator.justify = 'center';
-    var ddKEnd = kRangeGroup.add('dropdownlist', undefined, ['20%', '30%', '40%', '50%', '60%']);
-    ddKEnd.preferredSize.width = optionDropdownWidth + 10;
-    ddKEnd.selection = 0; // デフォルトは 20%
-    ddKEnd.helpTip = uiText('kReduceEndHelp');
-    var toggleTargets = [labelK, ddK, labelKRangeSeparator, ddKEnd];
+    var balanceDetailGroup = balancePanel.add('group');
+    balanceDetailGroup.orientation = 'row';
+    balanceDetailGroup.alignChildren = ['left', 'center'];
+    balanceDetailGroup.margins = 0;
+    balanceDetailGroup.spacing = 4;
+    var labelCMYSide = balanceDetailGroup.add('statictext', undefined, 'K-');
+    labelCMYSide.preferredSize.width = balanceSideLabelWidth;
+    labelCMYSide.justify = 'right';
+    var sliderCMYKBalance = balanceDetailGroup.add('slider', undefined, DEFAULT_CMY_K_BALANCE_VALUE, -100, 100);
+    sliderCMYKBalance.preferredSize.width = balanceSliderWidth;
+    sliderCMYKBalance.helpTip = uiText('cmyKBalanceSliderHelp');
+    function snapCMYKBalanceSlider() {
+        sliderCMYKBalance.value = snapToStep(sliderCMYKBalance.value, balanceSliderStep, -100, 100);
+        updateBalanceToleranceDisplay();
+    }
+    sliderCMYKBalance.onChanging = snapCMYKBalanceSlider;
+    sliderCMYKBalance.onChange = snapCMYKBalanceSlider;
+    var labelKSide = balanceDetailGroup.add('statictext', undefined, 'K+');
+    labelKSide.preferredSize.width = 18;
+    labelKSide.justify = 'left';
+    var balanceToleranceGroup = balancePanel.add('group');
+    balanceToleranceGroup.orientation = 'row';
+    balanceToleranceGroup.alignChildren = ['left', 'center'];
+    balanceToleranceGroup.margins = 0;
+    balanceToleranceGroup.spacing = 4;
+    balanceToleranceGroup.add('statictext', [0, 0, balanceSideLabelWidth, 14], '');
+    var balanceToleranceScaleGroup = balanceToleranceGroup.add('group');
+    balanceToleranceScaleGroup.orientation = 'row';
+    balanceToleranceScaleGroup.alignChildren = ['fill', 'center'];
+    balanceToleranceScaleGroup.preferredSize.width = balanceSliderWidth;
+    balanceToleranceScaleGroup.spacing = 0;
+    balanceToleranceScaleGroup.margins = 0;
+    balanceToleranceScaleGroup.helpTip = uiText('allowedColorDifferenceHelp');
+    var balanceToleranceValues = ['10', '3.5', '0', '3.5', '10'];
+    var balanceToleranceLabelWidths = [18, 27, 14, 27, 18];
+    var balanceToleranceGapWidths = [5, 16, 16, 5];
+    var balanceToleranceDisplayTargets = [];
+    for (var ti = 0; ti < balanceToleranceValues.length; ti++) {
+        var labelToleranceValue = balanceToleranceScaleGroup.add('statictext', undefined, balanceToleranceValues[ti]);
+        labelToleranceValue.preferredSize.width = balanceToleranceLabelWidths[ti];
+        labelToleranceValue.justify = ti === 0 ? 'left' : (ti === balanceToleranceValues.length - 1 ? 'right' : 'center');
+        labelToleranceValue.helpTip = uiText('allowedColorDifferenceHelp');
+        balanceToleranceDisplayTargets.push(labelToleranceValue);
+        if (ti < balanceToleranceGapWidths.length) {
+            balanceToleranceScaleGroup.add('statictext', [0, 0, balanceToleranceGapWidths[ti], 14], '');
+        }
+    }
 
-    var grayKGroup = kPanel.add('group');
-    grayKGroup.orientation = 'row';
-    var chkMoreGrayK = grayKGroup.add('checkbox', undefined, uiText('moreGrayK'));
-    chkMoreGrayK.value = false;
-    chkMoreGrayK.helpTip = uiText('moreGrayKHelp');
+    var toleranceLabelGroup = balancePanel.add('group');
+    toleranceLabelGroup.orientation = 'row';
+    toleranceLabelGroup.alignChildren = ['left', 'center'];
+    toleranceLabelGroup.margins = 0;
+    toleranceLabelGroup.spacing = 4;
+    toleranceLabelGroup.add('statictext', [0, 0, balanceSideLabelWidth - (allowedColorDifferenceLabelExtraWidth / 2), 14], '');
+    var labelAllowedColorDifference = toleranceLabelGroup.add('statictext', undefined, uiText('allowedColorDifference'));
+    labelAllowedColorDifference.preferredSize.width = balanceSliderWidth + allowedColorDifferenceLabelExtraWidth;
+    labelAllowedColorDifference.justify = 'center';
+    labelAllowedColorDifference.helpTip = uiText('allowedColorDifferenceHelp');
+    balanceToleranceDisplayTargets.push(labelAllowedColorDifference);
+
+    function updateBalanceToleranceDisplay() {
+        var isActive = snapToStep(readSliderInt(sliderCMYKBalance, 0), balanceSliderStep, -100, 100) !== 0;
+        setControlsEnabled(balanceToleranceDisplayTargets, isActive);
+    }
 
     function updateEnabled() {
         setControlsEnabled(satToggleTargets, chkSatBoost.value);
-        setControlsEnabled(toggleTargets, chkSaturation.value);
     }
     chkSatBoost.onClick = updateEnabled;
-    chkSaturation.onClick = updateEnabled;
     updateEnabled();
+    updateBalanceToleranceDisplay();
+
+    // 対象数と予測時間
+    var infoPanel = dlg.add('panel', undefined, uiText('info'));
+    infoPanel.alignment = 'fill';
+    infoPanel.orientation = 'column';
+    infoPanel.alignChildren = ['left', 'center'];
+    infoPanel.preferredSize.width = optionPanelWidth;
+    infoPanel.margins = infoPanelMargins;
+    infoPanel.spacing = 2;
+
+    var infoStack = infoPanel.add('group');
+    infoStack.orientation = 'column';
+    infoStack.alignment = 'fill';
+    infoStack.alignChildren = ['left', 'center'];
+    infoStack.spacing = 2;
+    infoStack.margins = 0;
+    infoStack.preferredSize.width = optionPanelWidth - 32;
+
+    var targetGroup = infoStack.add('group');
+    targetGroup.orientation = 'row';
+    targetGroup.alignment = 'fill';
+    targetGroup.alignChildren = ['left', 'center'];
+    targetGroup.preferredSize.width = optionPanelWidth - 32;
+    targetGroup.margins = 0;
+    var targetCountText = targetGroup.add('statictext', undefined, formatTargetCountText(targetCount, stats.unsupportedObjectCount));
+    targetCountText.alignment = ['left', 'center'];
+    targetCountText.justify = 'left';
+    targetCountText.helpTip = uiText('targetCountHelp');
+
+    var estimateSec = estimateProcessingSeconds(plannedCount);
+    var estimateGroup = infoStack.add('group');
+    estimateGroup.orientation = 'row';
+    estimateGroup.alignment = 'fill';
+    estimateGroup.alignChildren = ['left', 'center'];
+    estimateGroup.preferredSize.width = optionPanelWidth - 32;
+    estimateGroup.margins = 0;
+    var estimateText = estimateGroup.add('statictext', undefined, uiText('estimateTime') + ': ' + formatEstimatedTime(estimateSec));
+    estimateText.alignment = ['left', 'center'];
+    estimateText.justify = 'left';
+    estimateText.helpTip = uiText('estimateHelp');
+    if (estimateSec >= 60) setStaticTextRed(estimateText);
 
     // ボタン
     var btnGroup = dlg.add('group');
     btnGroup.alignment = 'right';
+    var versionText = dialogVersionText();
+    if (versionText) {
+        var versionLabel = btnGroup.add('statictext', undefined, versionText);
+        versionLabel.justify = 'left';
+        setStaticTextMuted(versionLabel);
+    }
     btnGroup.add('button', undefined, 'OK', {
         name: 'ok'
     });
@@ -466,10 +583,8 @@ function showConvertOptionsDialog(stats) {
         ok: false,
         enableSaturationBoost: false,
         saturationBoostPct: SATURATION_BOOST_PCT,
-        enableKTaper: false,
-        kReduceStart: K_REDUCE_START,
-        kReduceEnd: K_REDUCE_END,
-        enableMoreGrayKOnly: false
+        enableCMYKBalance: false,
+        cmyKBalanceValue: CMY_K_BALANCE_VALUE
     };
 
     var ret = dlg.show();
@@ -480,10 +595,8 @@ function showConvertOptionsDialog(stats) {
     result.ok = true;
     result.enableSaturationBoost = chkSatBoost.value;
     result.saturationBoostPct = readDropdownInt(ddSat, result.saturationBoostPct);
-    result.enableKTaper = chkSaturation.value;
-    result.kReduceStart = readDropdownInt(ddK, result.kReduceStart);
-    result.kReduceEnd = readDropdownInt(ddKEnd, result.kReduceEnd);
-    result.enableMoreGrayKOnly = chkMoreGrayK.value;
+    result.cmyKBalanceValue = snapToStep(readSliderInt(sliderCMYKBalance, result.cmyKBalanceValue), balanceSliderStep, -100, 100);
+    result.enableCMYKBalance = result.cmyKBalanceValue !== 0;
     return result;
 }
 
@@ -868,23 +981,115 @@ function isAlmostPureK(cmyk) {
     return cmyk.c <= ZERO_THR && cmyk.m <= ZERO_THR && cmyk.y <= ZERO_THR;
 }
 
-function taperKValue(k0) {
-    if (k0 <= K_REDUCE_START) return 0;
-    if (k0 >= K_REDUCE_END) return k0;
-
-    var w = (k0 - K_REDUCE_START) / (K_REDUCE_END - K_REDUCE_START);
-    if (w < 0) w = 0;
-    if (w > 1) w = 1;
-    return k0 * w;
-}
-
-function buildCMYRefineMask(cmyk) {
+function makeCMYRefineMask(useC, useM, useY) {
     return {
-        c: (cmyk.c > ZERO_THR),
-        m: (cmyk.m > ZERO_THR),
-        y: (cmyk.y > ZERO_THR),
+        c: !!useC,
+        m: !!useM,
+        y: !!useY,
         k: false
     };
+}
+
+function cmyRefineMasks() {
+    return [
+        makeCMYRefineMask(true, true, false),
+        makeCMYRefineMask(false, true, true),
+        makeCMYRefineMask(true, false, true)
+    ];
+}
+
+function applyCMYMask(cmyk, mask) {
+    var out = copyCMYK(cmyk);
+    if (!mask.c) out.c = 0;
+    if (!mask.m) out.m = 0;
+    if (!mask.y) out.y = 0;
+    return out;
+}
+
+function refineBestCMYPair(start, targetLab) {
+    var masks = cmyRefineMasks();
+    var best = null;
+    for (var i = 0; i < masks.length; i++) {
+        var mask = masks[i];
+        var maskedStart = applyCMYMask(start, mask);
+        var candidate = refineWithMaskLSPasses(maskedStart, targetLab, mask, CMY_K_BALANCE_REFINE_PASSES);
+        if (!best || candidate.dE < best.dE) {
+            best = candidate;
+        }
+    }
+    return best || makeLabResultFromCMYK(start, targetLab);
+}
+
+function finalizedLabResult(cmyk, targetLab) {
+    return makeLabResultFromCMYK(finalizeCMYK(cmyk), targetLab);
+}
+
+function kIsReduced(base, candidate) {
+    if (!base || !candidate) return false;
+    return roundCMYKValue(candidate.k, true) < roundCMYKValue(base.k, true);
+}
+
+function findCMYBalanceResult(adj, targetLab, amount) {
+    if (adj.k <= ZERO_THR) return adj;
+
+    var bestReduced = null;
+    for (var i = 0; i < CMY_K_BALANCE_K_REDUCTION_FACTORS.length; i++) {
+        var trialAmount = amount * CMY_K_BALANCE_K_REDUCTION_FACTORS[i];
+        if (trialAmount <= 0) continue;
+
+        var out = copyCMYK(adj);
+        out.k = clampPct(adj.k * (1 - trialAmount));
+        if (!kIsReduced(adj, out)) continue;
+
+        var candidate = finalizedLabResult(refineBestCMYPair(out, targetLab), targetLab);
+        if (!kIsReduced(adj, candidate)) continue;
+
+        if (!bestReduced || candidate.k < bestReduced.k || (candidate.k === bestReduced.k && candidate.dE < bestReduced.dE)) {
+            bestReduced = candidate;
+        }
+        if (acceptCMYKBalanceResult(adj, candidate, amount)) return candidate;
+    }
+
+    return bestReduced && acceptCMYKBalanceResult(adj, bestReduced, amount) ? bestReduced : adj;
+}
+
+function buildKRefineMask() {
+    return {
+        c: false,
+        m: false,
+        y: false,
+        k: true
+    };
+}
+
+function cmyKBalanceCurve(value) {
+    var t = Math.abs(Number(value)) / 100;
+    if (isNaN(t) || t <= 0) return 0;
+    if (t >= 1) return 1;
+    var denom = Math.exp(CMY_K_BALANCE_CURVE) - 1;
+    if (denom <= 0) return t;
+    return (Math.exp(CMY_K_BALANCE_CURVE * t) - 1) / denom;
+}
+
+function refineWithMaskLSPasses(start, targetLab, allowed, passes) {
+    var best = makeLabResultFromCMYK(start, targetLab);
+    for (var i = 0; i < passes; i++) {
+        var next = refineWithMaskLS(best, targetLab, allowed);
+        if (!next || next.dE > best.dE + CMY_K_BALANCE_CHANGE_EPS) break;
+        if (Math.abs(next.dE - best.dE) < CMY_K_BALANCE_CHANGE_EPS) {
+            best = next;
+            break;
+        }
+        best = next;
+    }
+    return best;
+}
+
+function acceptCMYKBalanceResult(base, candidate, amount) {
+    if (!candidate) return false;
+    if (candidate.dE <= base.dE) return true;
+    var limit = CMY_K_BALANCE_DE_BASE + (CMY_K_BALANCE_DE_RANGE * amount);
+    return candidate.dE <= limit && (candidate.dE - base.dE) <= limit;
 }
 
 function applySaturationBoostToLab(lab, pct) {
@@ -899,28 +1104,30 @@ function applySaturationBoostToLab(lab, pct) {
     };
 }
 
-// -------- K削減 + CMY再フィット（Labを維持するための後処理） --------
-function taperKAndRefineCMY(adj, targetLab) {
-    // adj: {c,m,y,k,(L,a,b,dE)} / targetLab: {L,a,b}
+// -------- CMY/Kバランス補正（Labを維持するための後処理） --------
+function applyCMYKBalance(adj, targetLab) {
     if (!adj || !targetLab) return adj;
+    if (!CMY_K_BALANCE_ENABLED || CMY_K_BALANCE_VALUE === 0) return adj;
+    if (isAlmostPureK(adj)) return adj;
 
-    // 元の値をコピー
+    var balanceValue = CMY_K_BALANCE_VALUE;
+    if (balanceValue < -100) balanceValue = -100;
+    if (balanceValue > 100) balanceValue = 100;
+
+    var amount = cmyKBalanceCurve(balanceValue);
+    if (amount <= 0) return adj;
+
     var out = copyCMYK(adj);
-
-    // K削減全体が無効なら何もしない
-    if (!K_TAPER_ENABLED) {
-        return adj;
+    if (balanceValue > 0) {
+        var cmyScale = 1 - amount;
+        out.c = clampPct(out.c * cmyScale);
+        out.m = clampPct(out.m * cmyScale);
+        out.y = clampPct(out.y * cmyScale);
+        var kRes = refineWithMaskLSPasses(out, targetLab, buildKRefineMask(), CMY_K_BALANCE_REFINE_PASSES);
+        return acceptCMYKBalanceResult(adj, kRes, amount) ? kRes : adj;
+    } else {
+        return findCMYBalanceResult(adj, targetLab, amount);
     }
-
-    if (isAlmostPureK(out)) return adj;
-
-    var k0 = out.k;
-    out.k = taperKValue(k0);
-
-    if (Math.abs(out.k - k0) < K_TAPER_CHANGE_EPS) return adj;
-
-    var res = refineWithMaskLS(out, targetLab, buildCMYRefineMask(out));
-    return res || makeLabResultFromCMYK(out, targetLab);
 }
 
 // -------- 直接探索: CMYのうち1色以上を0にしたパターンでLabへ近づける --------
@@ -1390,7 +1597,6 @@ function shouldPreferDirectKOnlyDark(decisionLab, bestResult, kOnlyResult, score
 
 function isDirectKOnlyDecisionArea(decisionLab) {
     if (labChroma(decisionLab) > DIRECT_K_ONLY_DARK_CHROMA_MAX) return false;
-    if (MORE_GRAY_TO_K_ONLY_ENABLED) return true;
     return decisionLab.L <= DIRECT_K_ONLY_DARK_L_MAX;
 }
 
@@ -1429,9 +1635,7 @@ function computeAdjustedResult(orig, useCache) {
         return makeColorProcessResult(false, 'noCandidate');
     }
 
-    if (K_TAPER_ENABLED && adj.k < K_REDUCE_END) {
-        adj = taperKAndRefineCMY(adj, targetLab);
-    }
+    adj = applyCMYKBalance(adj, targetLab);
 
     var finalOut = finalizeCMYK(adj);
     var changed = !isSameCMYK(orig, finalOut);
@@ -1798,12 +2002,10 @@ function cleanupAfterRun() {
         processedGradientMap = {};
         cacheHitCount = 0;
         gSkipCount = 0;
-        K_TAPER_ENABLED = DEFAULT_K_TAPER_ENABLED;
-        K_REDUCE_START = DEFAULT_K_REDUCE_START;
-        K_REDUCE_END = DEFAULT_K_REDUCE_END;
+        CMY_K_BALANCE_ENABLED = DEFAULT_CMY_K_BALANCE_ENABLED;
+        CMY_K_BALANCE_VALUE = DEFAULT_CMY_K_BALANCE_VALUE;
         SATURATION_BOOST_ENABLED = DEFAULT_SATURATION_BOOST_ENABLED;
         SATURATION_BOOST_PCT = DEFAULT_SATURATION_BOOST_PCT;
-        MORE_GRAY_TO_K_ONLY_ENABLED = DEFAULT_MORE_GRAY_TO_K_ONLY_ENABLED;
         $.gc();
     } catch (e) { }
     try {
@@ -1833,10 +2035,8 @@ function cleanupAfterRun() {
         }
         SATURATION_BOOST_ENABLED = opt.enableSaturationBoost;
         SATURATION_BOOST_PCT = opt.saturationBoostPct;
-        K_TAPER_ENABLED = opt.enableKTaper;
-        K_REDUCE_START = opt.kReduceStart;
-        K_REDUCE_END = opt.kReduceEnd;
-        MORE_GRAY_TO_K_ONLY_ENABLED = opt.enableMoreGrayKOnly;
+        CMY_K_BALANCE_ENABLED = opt.enableCMYKBalance;
+        CMY_K_BALANCE_VALUE = opt.cmyKBalanceValue;
 
         gProgress = createProgressBar(stats.planned > 0 ? stats.planned : 100);
         var t0 = nowMs();
