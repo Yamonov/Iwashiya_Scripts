@@ -59,7 +59,9 @@ var YamoScriptVersionOnly = formatScriptVersionOnly(YamoScriptMeta);
 
 var UI_TEXT = {
     progressTitle: { ja: "CMYK値を整理中...", en: "Adjusting CMYK..." },
+    progressCancelTitleSuffix: { ja: "（Escでキャンセル）", en: "(Esc to cancel)" },
     scanningSelection: { ja: "対象を調査中...", en: "Checking selection..." },
+    scanCancelHelp: { ja: "Escでキャンセル", en: "Press Esc to cancel" },
     optionsTitle: { ja: "変換オプション", en: "Conversion Options" },
     titleSeparator: { ja: "　｜　", en: " | " },
     targetCount: { ja: "対象数{count}", en: "Targets {count}" },
@@ -213,6 +215,10 @@ var K_ONLY_SEED = { c: 0, m: 0, y: 0, k: 50 };
 // 進行状況バー（ScriptUI）: 幅400px、分母は動的に+10%
 var gProgress = null;
 var gSkipCount = 0;
+var USER_CANCELLED_ERROR_NAME = "YamoUserCancelled";
+var SCAN_STATUS_CHECK_EVERY = 50;
+var PROGRESS_STATUS_CHECK_EVERY = 100;
+var PROGRESS_CANCEL_CHECK_EVERY_UPDATES = 10;
 
 function resetSkipCount() {
     gSkipCount = 0;
@@ -222,21 +228,72 @@ function countSkip() {
     gSkipCount++;
 }
 
+function isEscapeKeyName(keyName) {
+    if (!keyName && keyName !== 0) return false;
+    keyName = String(keyName).toLowerCase();
+    return keyName === 'escape' || keyName === 'esc' || keyName === 'u+001b' || keyName === '27';
+}
+
+function attachEscapeCancelHandler(win, requestCancel) {
+    try {
+        win.addEventListener('keydown', function (ev) {
+            if (ev && isEscapeKeyName(ev.keyName || ev.keyIdentifier || ev.key || ev.keyCode || ev.which)) {
+                requestCancel();
+                try {
+                    ev.preventDefault();
+                } catch (e) { }
+            }
+        });
+    } catch (e2) { }
+}
+
+function isEscapePressed() {
+    try {
+        var ks = ScriptUI.environment.keyboardState;
+        return !!(ks && isEscapeKeyName(ks.keyName || ks.keyIdentifier || ks.key || ks.keyCode || ks.which));
+    } catch (e) {
+        return false;
+    }
+}
+
+function makeUserCancelledError() {
+    var e = new Error("User cancelled");
+    e.name = USER_CANCELLED_ERROR_NAME;
+    return e;
+}
+
+function isUserCancelledError(e) {
+    return e && e.name === USER_CANCELLED_ERROR_NAME;
+}
+
 function createProgressBar(initialMax) {
-    var win = new Window('palette', uiText('progressTitle') + ' ' + YamoScriptVersion, undefined, {
+    var cancelled = false;
+    var win = new Window('palette', uiText('progressTitle') + ' ' + uiText('progressCancelTitleSuffix'), undefined, {
         closeButton: false
     });
     var bar = win.add('progressbar', undefined, 0, Math.max(1, initialMax | 0));
     bar.preferredSize = [400, 20];
+    function requestCancel() {
+        cancelled = true;
+    }
+    attachEscapeCancelHandler(win, requestCancel);
+    win.onClose = function () {
+        requestCancel();
+        return true;
+    };
     win.layout.layout(true);
     win.center();
     win.show();
+    try {
+        win.update();
+    } catch (e2) { }
     var state = {
         win: win,
         bar: bar,
         value: 0,
         max: Math.max(1, initialMax | 0),
-        updateEvery: 10
+        updateEvery: PROGRESS_STATUS_CHECK_EVERY,
+        updateCount: 0
     };
     return {
         step: function (n) {
@@ -251,12 +308,19 @@ function createProgressBar(initialMax) {
             var shouldUpdate = (forceUpdate || state.value >= state.max || (state.value % state.updateEvery) === 0);
             if (shouldUpdate) {
                 state.bar.value = Math.min(state.value, state.max);
+                state.updateCount++;
+                var shouldCheckCancel = (state.updateCount % PROGRESS_CANCEL_CHECK_EVERY_UPDATES) === 0;
                 try {
                     state.win.update();
                 } catch (e) { }
+                if (shouldCheckCancel && isEscapePressed()) requestCancel();
+                if (shouldCheckCancel && cancelled) throw makeUserCancelledError();
             }
         },
         close: function () {
+            try {
+                state.win.onClose = null;
+            } catch (e) { }
             try {
                 state.win.close();
             } catch (e) { }
@@ -264,15 +328,17 @@ function createProgressBar(initialMax) {
     };
 }
 
-function createStatusWindow(message, width) {
-    var frames = ['●○○', '○●○', '○○●'];
+function createStatusWindow(message, width, helpText) {
+    var frames = ['●○○', '○●○', '○○●', '○●○'];
     var frameIndex = 0;
     var tickCount = 0;
-    var updateEvery = 50;
+    var updateEvery = SCAN_STATUS_CHECK_EVERY;
     var updateIntervalMs = 300;
     var lastUpdateMs = nowMs();
-    var win = new Window('palette', message, undefined, {
-        closeButton: false
+    var cancelled = false;
+    var win = new Window('palette', '', undefined, {
+        closeButton: false,
+        borderless: true
     });
     win.alignChildren = 'center';
     var label = win.add('statictext', undefined, message + ' ' + frames[frameIndex]);
@@ -280,27 +346,50 @@ function createStatusWindow(message, width) {
     try {
         label.justify = 'center';
     } catch (e) { }
+    if (helpText) {
+        var helpLabel = win.add('statictext', undefined, helpText);
+        helpLabel.preferredSize = [width || 200, 18];
+        try {
+            helpLabel.justify = 'center';
+        } catch (e2) { }
+        try {
+            helpLabel.graphics.foregroundColor = helpLabel.graphics.newPen(helpLabel.graphics.PenType.SOLID_COLOR, [0.55, 0.55, 0.55], 1);
+        } catch (e3) { }
+    }
+    function requestCancel() {
+        cancelled = true;
+    }
+    attachEscapeCancelHandler(win, requestCancel);
+    win.onClose = function () {
+        requestCancel();
+        return true;
+    };
     win.layout.layout(true);
     win.center();
     win.show();
     try {
         win.update();
-    } catch (e) { }
+    } catch (e4) { }
 
     return {
         tick: function () {
             tickCount++;
-            if ((tickCount % updateEvery) !== 0) return;
+            if ((tickCount % updateEvery) !== 0) return true;
             var t = nowMs();
-            if ((t - lastUpdateMs) < updateIntervalMs) return;
+            if ((t - lastUpdateMs) < updateIntervalMs) return true;
             frameIndex = (frameIndex + 1) % frames.length;
             label.text = message + ' ' + frames[frameIndex];
             lastUpdateMs = t;
             try {
                 win.update();
-            } catch (e) { }
+            } catch (e5) { }
+            if (isEscapePressed()) requestCancel();
+            if (cancelled) throw makeUserCancelledError();
         },
         close: function () {
+            try {
+                win.onClose = null;
+            } catch (e) { }
             try {
                 win.close();
             } catch (e) { }
@@ -1723,6 +1812,7 @@ function processColorProperty(target, propName, allowGradient) {
         stepProgress(1);
         return changed;
     } catch (e) {
+        if (isUserCancelledError(e)) throw e;
         countSkip();
         return 0;
     }
@@ -1776,6 +1866,7 @@ function processGradientColor(gradColor) {
                 changed += applyColorResultToProperty(stop, 'color', processColorObject(col));
             }
         } catch (e) {
+            if (isUserCancelledError(e)) throw e;
             countSkip();
         }
         stepProgress(1);
@@ -1821,18 +1912,28 @@ function walkSelectionArtItems(visitor, unsupportedVisitor) {
         if (!it) return;
         var tn = it.typename;
         if (tn === 'GroupItem') {
+            var arr;
             try {
-                var arr = it.pageItems;
-                for (var i = 0, n = arr.length; i < n; i++) walk(arr[i]);
+                arr = it.pageItems;
             } catch (e) {
+                if (isUserCancelledError(e)) throw e;
                 if (unsupportedVisitor) unsupportedVisitor(it);
+                return;
+            }
+            for (var i = 0, n = arr.length; i < n; i++) {
+                walk(arr[i]);
             }
         } else if (tn === 'CompoundPathItem') {
+            var arr2;
             try {
-                var arr2 = it.pathItems;
-                for (var j = 0, n2 = arr2.length; j < n2; j++) walk(arr2[j]);
+                arr2 = it.pathItems;
             } catch (e2) {
+                if (isUserCancelledError(e2)) throw e2;
                 if (unsupportedVisitor) unsupportedVisitor(it);
+                return;
+            }
+            for (var j = 0, n2 = arr2.length; j < n2; j++) {
+                walk(arr2[j]);
             }
         } else if (tn === 'TextFrame' || tn === 'PathItem') {
             visitor(it);
@@ -1948,7 +2049,8 @@ function collectSelectionStats(showStatusWindow) {
     var selectedObjectCount = 0;
     var unsupportedObjectCount = 0;
     var items = [];
-    var statusWindow = showStatusWindow ? createStatusWindow(uiText('scanningSelection'), 200) : null;
+    var cancelled = false;
+    var statusWindow = showStatusWindow ? createStatusWindow(uiText('scanningSelection'), 220, uiText('scanCancelHelp')) : null;
     try {
         walkSelectionArtItems(function (it) {
             var entry = makeSelectionArtItemEntry(it);
@@ -1960,9 +2062,16 @@ function collectSelectionStats(showStatusWindow) {
             unsupportedObjectCount++;
             if (statusWindow) statusWindow.tick();
         });
-    } catch (e) { }
+    } catch (e) {
+        if (isUserCancelledError(e)) {
+            cancelled = true;
+        } else {
+            throw e;
+        }
+    }
     if (statusWindow) statusWindow.close();
     return {
+        cancelled: !!cancelled,
         planned: planned,
         selectedObjectCount: selectedObjectCount,
         unsupportedObjectCount: unsupportedObjectCount,
@@ -2027,6 +2136,7 @@ function cleanupAfterRun() {
         resetSkipCount();
 
         var stats = collectSelectionStats(true);
+        if (!stats || stats.cancelled) return;
 
         var opt = showConvertOptionsDialog(stats);
         if (!opt || !opt.ok) {
@@ -2045,13 +2155,21 @@ function cleanupAfterRun() {
         var appliedInfo = null;
         var totalSec = 0;
         var msg = null;
+        var cancelled = false;
         try {
             appliedInfo = applyToSelection(stats.items);
             totalSec = (nowMs() - t0) / 1000.0; // 変換処理のみの時間
             msg = buildResultMessage(stats.selectedObjectCount, stats.planned, appliedInfo, totalSec);
+        } catch (e) {
+            if (isUserCancelledError(e)) {
+                cancelled = true;
+            } else {
+                throw e;
+            }
         } finally {
             cleanupAfterRun();
         }
+        if (cancelled) return;
 
         // 実行結果をダイアログ表示
         alert(msg.join("\n"));
