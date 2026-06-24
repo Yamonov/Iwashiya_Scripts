@@ -13,9 +13,10 @@ Target-App=Illustrator
 Edit-Password-SHA256=VXumlreZb7NPYcxh:f4fb797ffdcf1bef1ddae7ae66c3884fadd33a1ac230f8213a59a84706aa1ace
 Description-BEGIN
 オブジェクトを選択して実行すると、下方向に
-Cのみ、Mのみ………のオブジェクトを複製配置します
+Cのみ、Mのみ………のオブジェクトを複製配置します。
 Description-END
 SCRIPTMETA-END
+
 
 */
 

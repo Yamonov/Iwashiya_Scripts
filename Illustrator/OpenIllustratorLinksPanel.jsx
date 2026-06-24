@@ -10,7 +10,9 @@ Name=リンクパネルを表示・非表示
 Author=Murakami Yoshiteru
 Target-App=Illustrator
 Edit-Password-SHA256=nctKXgHsvLycDgVw:c12b07688ead9b5e623e5c1d0a7e8062d0858464a2ae5a0a2fc9913aa7a7bd51
+Description=123
 SCRIPTMETA-END
+
 
 */
 
