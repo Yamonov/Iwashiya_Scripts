@@ -12,9 +12,16 @@ Version=0.5
 Script-ID=org.iwashi.OpenIllustratorLinksPanel
 Version=1
 
+Script-ID=keypadSettingsChager_Ai
+Version=1.2
+
 SCRIPTMETA-DIST-END
 
 # Changelog
+
+## keypadSettingsChager_Ai
+Ver 1.2:テンキーで変形基準点、変形関連設定、表示関連設定、単位プリセットを即時変更するUIに更新。
+Ver 1:テンキー入力で変形基準点とIllustratorの各種設定を即時変更するUIを追加。
 
 ## org.iwashi.CMYKto100GCRConverter_ai
 Ver 2.1.8:escでキャンセル可能に。速度への影響を最小にしました。
