@@ -3,7 +3,7 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=keypadSettingsChager_Ai
-Version=1.2
+Version=1.3
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=各種設定をテンキーで変更
 Author=Murakami Yoshiteru
@@ -324,6 +324,17 @@ SCRIPTMETA-END
 
     function getOptionDefinitions() {
         return [
+            {
+                label: "コピー元のレイヤーにペースト",
+                shortcut: "=",
+                getValue: function () {
+                    return getBooleanPreference("layers/pastePreserve");
+                },
+                setValue: function (value) {
+                    app.preferences.setBooleanPreference("layers/pastePreserve", value);
+                    app.preferences.setBooleanPreference("layers/pastePreserveBackup", value);
+                }
+            },
             {
                 label: "線幅と効果も拡大・縮小",
                 shortcut: "/",
@@ -742,6 +753,9 @@ SCRIPTMETA-END
             "plus": "+",
             "add": "+",
             "numpadadd": "+",
+            "equal": "=",
+            "equals": "=",
+            "numpadequal": "=",
             "comma": ",",
             "period": ".",
             "decimal": ".",
@@ -750,6 +764,7 @@ SCRIPTMETA-END
             "u+002a": "*",
             "u+002d": "-",
             "u+002b": "+",
+            "u+003d": "=",
             "u+002c": ",",
             "u+002e": "."
         };
@@ -783,6 +798,7 @@ SCRIPTMETA-END
             45: "-",
             46: ".",
             47: "/",
+            61: "=",
             67: "*",
             69: "+",
             75: "/",
