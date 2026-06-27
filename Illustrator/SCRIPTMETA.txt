@@ -13,13 +13,14 @@ Script-ID=org.iwashi.OpenIllustratorLinksPanel
 Version=1
 
 Script-ID=keypadSettingsChager_Ai
-Version=1.3
+Version=1.4
 
 SCRIPTMETA-DIST-END
 
 # Changelog
 
 ## keypadSettingsChager_Ai
+Ver 1.4:基準点表示を描画UIに変更し、クリック処理の重複実行を整理。
 Ver 1.3:「コピー元のレイヤーにペースト」を即時変更できる項目として追加。
 Ver 1.2:テンキーで変形基準点、変形関連設定、表示関連設定、単位プリセットを即時変更するUIに更新。
 Ver 1:テンキー入力で変形基準点とIllustratorの各種設定を即時変更するUIを追加。

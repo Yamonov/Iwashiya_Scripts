@@ -3,7 +3,7 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=keypadSettingsChager_Ai
-Version=1.3
+Version=1.4
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=各種設定をテンキーで変更
 Author=Murakami Yoshiteru
@@ -15,6 +15,98 @@ SCRIPTMETA-END
 (function () {
     var PREF_KEY = "plugin/Transform/AnchorPoint";
     var TRANSFORM_PANEL_COMMAND = "AdobeTransformObjects1";
+    var ANCHOR_PREVIEW_SIZE = 136;
+    var ANCHOR_BOX_SIZE = 26;
+    var ANCHOR_LINE_WIDTH = 1.5;
+    var ANCHOR_KEY_FONT_SIZE = 9;
+    var DUPLICATE_INPUT_INTERVAL = 200;
+    var ANCHOR_POSITIONS = [
+        [6, 6],
+        [55, 6],
+        [104, 6],
+        [6, 55],
+        [55, 55],
+        [104, 55],
+        [6, 104],
+        [55, 104],
+        [104, 104]
+    ];
+    var ANCHOR_LINES = [
+        [32, 19, 55, 19],
+        [81, 19, 104, 19],
+        [117, 32, 117, 55],
+        [117, 81, 117, 104],
+        [81, 117, 104, 117],
+        [32, 117, 55, 117],
+        [19, 81, 19, 104],
+        [19, 32, 19, 55]
+    ];
+    var ANCHOR_KEYS = ["7", "8", "9", "4", "5", "6", "1", "2", "3"];
+    var KEY_TO_POINT = {
+        "7": 0,
+        "8": 1,
+        "9": 2,
+        "4": 3,
+        "5": 4,
+        "6": 5,
+        "1": 6,
+        "2": 7,
+        "3": 8
+    };
+    var NAMED_SHORTCUTS = {
+        "slash": "/",
+        "divide": "/",
+        "numpaddivide": "/",
+        "asterisk": "*",
+        "multiply": "*",
+        "numpadmultiply": "*",
+        "minus": "-",
+        "hyphen": "-",
+        "subtract": "-",
+        "numpadsubtract": "-",
+        "plus": "+",
+        "add": "+",
+        "numpadadd": "+",
+        "equal": "=",
+        "equals": "=",
+        "numpadequal": "=",
+        "comma": ",",
+        "period": ".",
+        "decimal": ".",
+        "numpaddecimal": ".",
+        "u+002f": "/",
+        "u+002a": "*",
+        "u+002d": "-",
+        "u+002b": "+",
+        "u+003d": "=",
+        "u+002c": ",",
+        "u+002e": "."
+    };
+    var KEY_CODE_TO_SHORTCUT = {
+        42: "*",
+        43: "+",
+        44: ",",
+        45: "-",
+        46: ".",
+        47: "/",
+        61: "=",
+        67: "*",
+        69: "+",
+        75: "/",
+        78: "-",
+        82: "0",
+        96: "0",
+        106: "*",
+        107: "+",
+        109: "-",
+        110: ".",
+        111: "/",
+        187: "+",
+        188: ",",
+        189: "-",
+        190: ".",
+        191: "/"
+    };
 
     var originalPoint = readPoint();
     var selectedPoint = originalPoint;
@@ -25,8 +117,8 @@ SCRIPTMETA-END
     var selectedUnitPresetIndex = 0;
     var lastHandledKey = "";
     var lastHandledAt = 0;
-    var lastClickedOption = null;
-    var lastOptionClickAt = 0;
+    var lastClickedItem = null;
+    var lastItemClickAt = 0;
 
     var win = new Window("dialog", "設定を変更");
     win.orientation = "column";
@@ -44,38 +136,15 @@ SCRIPTMETA-END
     anchorBlock.orientation = "column";
     anchorBlock.alignChildren = ["center", "center"];
     anchorBlock.margins = 0;
-    anchorBlock.spacing = 2;
+    anchorBlock.spacing = 0;
 
-    var cells = [];
-    var grid = anchorBlock.add("group");
-    grid.orientation = "column";
-    grid.alignChildren = ["center", "center"];
-    grid.margins = 0;
-    grid.spacing = 0;
-
-    for (var rowIndex = 0; rowIndex < 3; rowIndex++) {
-        var row = grid.add("group");
-        row.orientation = "row";
-        row.alignChildren = ["center", "center"];
-        row.margins = 0;
-        row.spacing = 0;
-
-        for (var colIndex = 0; colIndex < 3; colIndex++) {
-            var cell = row.add("statictext", undefined, "□");
-            cell.justify = "center";
-            cell.preferredSize = [18, 18];
-            setCellFont(cell);
-            cells.push(cell);
-        }
-    }
+    var anchorPreview = anchorBlock.add("statictext", undefined, "");
+    anchorPreview.preferredSize = [ANCHOR_PREVIEW_SIZE, ANCHOR_PREVIEW_SIZE];
+    anchorPreview.minimumSize = [ANCHOR_PREVIEW_SIZE, ANCHOR_PREVIEW_SIZE];
+    anchorPreview.maximumSize = [ANCHOR_PREVIEW_SIZE, ANCHOR_PREVIEW_SIZE];
+    anchorPreview.onDraw = drawAnchorPreview;
 
     updateDisplay(selectedPoint);
-
-    var keypadLabel = anchorBlock.add("statictext", undefined, "テンキー");
-    keypadLabel.justify = "center";
-    try {
-        keypadLabel.graphics.font = ScriptUI.newFont("dialog", ScriptUI.FontStyle.REGULAR, 10);
-    } catch (e2b) { }
 
     var options = body.add("group");
     options.orientation = "row";
@@ -237,8 +306,99 @@ SCRIPTMETA-END
     }
 
     function updateDisplay(point) {
-        for (var i = 0; i < cells.length; i++) {
-            cells[i].text = i === point ? "■" : "□";
+        selectedPoint = point;
+        try {
+            anchorPreview.notify("onDraw");
+        } catch (e) { }
+
+        refreshWindow();
+    }
+
+    function drawAnchorPreview() {
+        var g = this.graphics;
+        var colors = getAnchorPreviewColors();
+        var pen = g.newPen(g.PenType.SOLID_COLOR, colors.line, ANCHOR_LINE_WIDTH);
+        var fill = g.newBrush(g.BrushType.SOLID_COLOR, colors.fill);
+        var boxSize = ANCHOR_BOX_SIZE;
+        var i;
+
+        for (i = 0; i < ANCHOR_LINES.length; i++) {
+            drawLine(g, pen, ANCHOR_LINES[i][0], ANCHOR_LINES[i][1], ANCHOR_LINES[i][2], ANCHOR_LINES[i][3]);
+        }
+
+        for (i = 0; i < ANCHOR_POSITIONS.length; i++) {
+            drawAnchorBox(g, pen, fill, colors, ANCHOR_POSITIONS[i][0], ANCHOR_POSITIONS[i][1], boxSize, i === selectedPoint, ANCHOR_KEYS[i]);
+        }
+    }
+
+    function getAnchorPreviewColors() {
+        var isDark = isDarkUi();
+
+        return {
+            line: isDark ? [0.96, 0.96, 0.94, 1] : [0.06, 0.05, 0.04, 1],
+            fill: isDark ? [0.96, 0.96, 0.94, 1] : [0.06, 0.05, 0.04, 1],
+            normalText: isDark ? [0.96, 0.96, 0.94, 1] : [0.06, 0.05, 0.04, 1],
+            selectedText: isDark ? [0.06, 0.05, 0.04, 1] : [0.98, 0.98, 0.96, 1]
+        };
+    }
+
+    function isDarkUi() {
+        try {
+            return app.preferences.getRealPreference("uiBrightness") <= 0.5;
+        } catch (e) { }
+
+        return false;
+    }
+
+    function drawLine(g, pen, x1, y1, x2, y2) {
+        g.newPath();
+        g.moveTo(x1, y1);
+        g.lineTo(x2, y2);
+        g.strokePath(pen);
+    }
+
+    function drawAnchorBox(g, pen, fill, colors, x, y, size, selected, label) {
+        if (selected) {
+            g.newPath();
+            g.rectPath(x, y, size, size);
+            g.fillPath(fill);
+        }
+
+        g.newPath();
+        g.rectPath(x, y, size, size);
+        g.strokePath(pen);
+
+        drawAnchorKeyLabel(g, colors, x, y, size, selected, label);
+    }
+
+    function drawAnchorKeyLabel(g, colors, x, y, size, selected, label) {
+        var labelColor = selected ? colors.selectedText : colors.normalText;
+        var textPen = g.newPen(g.PenType.SOLID_COLOR, labelColor, 1);
+        var fontSize = ANCHOR_KEY_FONT_SIZE;
+        var font = null;
+        var textWidth = fontSize * 0.6;
+        var textX;
+        var textY;
+
+        try {
+            font = ScriptUI.newFont("dialog", ScriptUI.FontStyle.REGULAR, fontSize);
+        } catch (eFont) {
+            font = null;
+        }
+
+        try {
+            textWidth = g.measureString(label, font)[0];
+        } catch (eMeasure) { }
+
+        textX = Math.round(x + (size - textWidth) / 2);
+        textY = Math.round(y + (size - fontSize) / 2) - 1;
+
+        try {
+            g.drawString(label, textPen, textX, textY, font);
+        } catch (eDraw) {
+            try {
+                g.drawString(label, textPen, textX, textY);
+            } catch (eDraw2) { }
         }
     }
 
@@ -260,7 +420,7 @@ SCRIPTMETA-END
             var mark = row.add("statictext", undefined, "□");
             mark.justify = "center";
             mark.preferredSize = [16, 18];
-            setCellFont(mark);
+            setMarkFont(mark);
 
             var label = row.add("statictext", undefined, item.label + " [" + item.shortcut + "]");
             label.justify = "left";
@@ -302,7 +462,7 @@ SCRIPTMETA-END
             var mark = row.add("statictext", undefined, "□");
             mark.justify = "center";
             mark.preferredSize = [16, 18];
-            setCellFont(mark);
+            setMarkFont(mark);
 
             var label = row.add("statictext", undefined, item.label);
             label.justify = "left";
@@ -444,50 +604,42 @@ SCRIPTMETA-END
     }
 
     function attachOptionClickHandler(control, option) {
-        var handler = makeOptionClickHandler(option);
-        var eventNames = ["mousedown", "mouseup", "click"];
-
-        for (var i = 0; i < eventNames.length; i++) {
-            try {
-                control.addEventListener(eventNames[i], handler);
-            } catch (e) { }
-        }
-
-        control.onClick = handler;
-        control.onMouseDown = handler;
-        control.onMouseUp = handler;
+        attachMouseDownHandler(control, makeOptionClickHandler(option));
     }
 
     function makeOptionClickHandler(option) {
         return function () {
-            if (isDuplicateOptionClick(option)) {
+            if (isDuplicateItemClick(option)) {
                 return;
             }
 
-            rememberOptionClick(option);
+            rememberItemClick(option);
             setOptionValue(option, !option.value);
         };
     }
 
     function attachUnitPresetClickHandler(control, item) {
-        var handler = makeUnitPresetClickHandler(item);
-        var eventNames = ["mousedown", "mouseup", "click"];
-
-        for (var i = 0; i < eventNames.length; i++) {
-            try {
-                control.addEventListener(eventNames[i], handler);
-            } catch (e) { }
-        }
-
-        control.onClick = handler;
-        control.onMouseDown = handler;
-        control.onMouseUp = handler;
+        attachMouseDownHandler(control, makeUnitPresetClickHandler(item));
     }
 
     function makeUnitPresetClickHandler(item) {
         return function () {
+            if (isDuplicateItemClick(item)) {
+                return;
+            }
+
+            rememberItemClick(item);
             applyUnitPreset(item.index);
         };
+    }
+
+    function attachMouseDownHandler(control, handler) {
+        try {
+            control.addEventListener("mousedown", handler);
+            return;
+        } catch (e) { }
+
+        control.onMouseDown = handler;
     }
 
     function cycleUnitPreset() {
@@ -550,7 +702,7 @@ SCRIPTMETA-END
             6: "px"
         };
 
-        return Object.prototype.hasOwnProperty.call(labels, code) ? labels[code] : String(code);
+        return hasOwn(labels, code) ? labels[code] : String(code);
     }
 
     function getOptionValue(option) {
@@ -624,40 +776,28 @@ SCRIPTMETA-END
         } catch (e) { }
     }
 
-    function setCellFont(cell) {
+    function setMarkFont(mark) {
         try {
-            cell.graphics.font = ScriptUI.newFont("Osaka-Mono", ScriptUI.FontStyle.REGULAR, 18);
+            mark.graphics.font = ScriptUI.newFont("Osaka-Mono", ScriptUI.FontStyle.REGULAR, 18);
             return;
         } catch (e) { }
 
         try {
-            cell.graphics.font = ScriptUI.newFont("Menlo", ScriptUI.FontStyle.REGULAR, 18);
+            mark.graphics.font = ScriptUI.newFont("Menlo", ScriptUI.FontStyle.REGULAR, 18);
             return;
         } catch (e2) { }
 
         try {
-            cell.graphics.font = ScriptUI.newFont("dialog", ScriptUI.FontStyle.REGULAR, 18);
+            mark.graphics.font = ScriptUI.newFont("dialog", ScriptUI.FontStyle.REGULAR, 18);
         } catch (e3) { }
     }
 
     function keyToPoint(key) {
-        var map = {
-            "7": 0,
-            "8": 1,
-            "9": 2,
-            "4": 3,
-            "5": 4,
-            "6": 5,
-            "1": 6,
-            "2": 7,
-            "3": 8
-        };
-
-        return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : null;
+        return hasOwn(KEY_TO_POINT, key) ? KEY_TO_POINT[key] : null;
     }
 
     function keyToOption(key) {
-        return Object.prototype.hasOwnProperty.call(optionByShortcut, key) ? optionByShortcut[key] : null;
+        return hasOwn(optionByShortcut, key) ? optionByShortcut[key] : null;
     }
 
     function rememberHandledKey(key) {
@@ -674,20 +814,20 @@ SCRIPTMETA-END
             return false;
         }
 
-        return new Date().getTime() - lastHandledAt < 200;
+        return new Date().getTime() - lastHandledAt < DUPLICATE_INPUT_INTERVAL;
     }
 
-    function rememberOptionClick(option) {
-        lastClickedOption = option;
-        lastOptionClickAt = new Date().getTime();
+    function rememberItemClick(item) {
+        lastClickedItem = item;
+        lastItemClickAt = new Date().getTime();
     }
 
-    function isDuplicateOptionClick(option) {
-        if (option !== lastClickedOption) {
+    function isDuplicateItemClick(item) {
+        if (item !== lastClickedItem) {
             return false;
         }
 
-        return new Date().getTime() - lastOptionClickAt < 200;
+        return new Date().getTime() - lastItemClickAt < DUPLICATE_INPUT_INTERVAL;
     }
 
     function normalizeKey(ev) {
@@ -705,7 +845,7 @@ SCRIPTMETA-END
                 return "escape";
             }
 
-            if (Object.prototype.hasOwnProperty.call(optionByShortcut, raw)) {
+            if (hasOwn(optionByShortcut, raw)) {
                 return raw;
             }
 
@@ -739,37 +879,7 @@ SCRIPTMETA-END
     }
 
     function namedShortcutToKey(raw) {
-        var map = {
-            "slash": "/",
-            "divide": "/",
-            "numpaddivide": "/",
-            "asterisk": "*",
-            "multiply": "*",
-            "numpadmultiply": "*",
-            "minus": "-",
-            "hyphen": "-",
-            "subtract": "-",
-            "numpadsubtract": "-",
-            "plus": "+",
-            "add": "+",
-            "numpadadd": "+",
-            "equal": "=",
-            "equals": "=",
-            "numpadequal": "=",
-            "comma": ",",
-            "period": ".",
-            "decimal": ".",
-            "numpaddecimal": ".",
-            "u+002f": "/",
-            "u+002a": "*",
-            "u+002d": "-",
-            "u+002b": "+",
-            "u+003d": "=",
-            "u+002c": ",",
-            "u+002e": "."
-        };
-
-        return Object.prototype.hasOwnProperty.call(map, raw) ? map[raw] : "";
+        return hasOwn(NAMED_SHORTCUTS, raw) ? NAMED_SHORTCUTS[raw] : "";
     }
 
     function keyCodeToKey(code) {
@@ -791,34 +901,8 @@ SCRIPTMETA-END
             return String(code - 96);
         }
 
-        var map = {
-            42: "*",
-            43: "+",
-            44: ",",
-            45: "-",
-            46: ".",
-            47: "/",
-            61: "=",
-            67: "*",
-            69: "+",
-            75: "/",
-            78: "-",
-            82: "0",
-            96: "0",
-            106: "*",
-            107: "+",
-            109: "-",
-            110: ".",
-            111: "/",
-            187: "+",
-            188: ",",
-            189: "-",
-            190: ".",
-            191: "/"
-        };
-
-        if (Object.prototype.hasOwnProperty.call(map, code)) {
-            return map[code];
+        if (hasOwn(KEY_CODE_TO_SHORTCUT, code)) {
+            return KEY_CODE_TO_SHORTCUT[code];
         }
 
         return "";
@@ -828,5 +912,9 @@ SCRIPTMETA-END
         try {
             ev.preventDefault();
         } catch (e) { }
+    }
+
+    function hasOwn(object, key) {
+        return Object.prototype.hasOwnProperty.call(object, key);
     }
 }());
