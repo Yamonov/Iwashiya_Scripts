@@ -12,6 +12,9 @@ Version=0.5
 Script-ID=org.iwashi.OpenIllustratorLinksPanel
 Version=1
 
+Script-ID=org.iwashi.ToggleGuide_ai
+Version=1
+
 Script-ID=keypadSettingsChager_Ai
 Version=1.4
 
