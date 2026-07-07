@@ -3,11 +3,11 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
-Version=2.1.8
+Version=2.1.9
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=色を変えずにCMYK値を調整
 Author=Murakami Yoshiteru
-Release-Date=2026-06-18
+Release-Date=2026-07-07
 Target-App=Illustrator
 Edit-Password-SHA256=oS5aCLoTCKedGLZN:3d8282cb048f8c02d5bf1dca0493471b70fda75c2a3131e4cb0c10b4c1688127
 Description-BEGIN
@@ -85,17 +85,27 @@ var UI_TEXT = {
     saturationAmountHelp: { ja: "彩度を上げる割合です。", en: "Saturation increase amount." },
     cmyKBalance: { ja: "CMY/Kバランスを調整", en: "Adjust CMY/K balance" },
     cmyKBalanceHelp: {
-        ja: "K量をスライダで調整します。左はKを減らしてCMYで補完し、右はCMYを減らしてKで補完します。中央から動かすほど変換結果に許容する色差が大きくなります。",
-        en: "Adjusts the K amount with the slider. Left reduces K and compensates with CMY; right reduces CMY and compensates with K. The farther the slider moves from center, the larger the allowed color difference becomes."
+        ja: "K量をスライダで調整します。左はKを減らしてCMYで補完し、右はCMYを減らしてKで補完します。中央から動かすほど許容色差が大きくなり、暗い色ではL値に応じて最大2倍まで広がります。",
+        en: "Adjusts the K amount with the slider. Left reduces K and compensates with CMY; right reduces CMY and compensates with K. Moving away from center allows more color difference, expanding up to 2x for darker colors based on L*."
     },
-    allowedColorDifference: { ja: "最大許容色差", en: "Max allowed color difference" },
+    allowedColorDifference: { ja: "最大許容色差（⊿E76）", en: "Max allowed color difference (Delta E 76)" },
     allowedColorDifferenceHelp: {
-        ja: "上の数値はスライダ位置ごとの⊿E76での許容色差です。中央は変更なし、左右に動かすほど色差を大きく許容します。",
-        en: "The values above show the allowed color difference in Delta E 76 for each slider position. Center leaves the result unchanged; moving left or right allows a larger color difference."
+        ja: "上の数値はスライダ位置ごとの基準値です。明るい色ではその値を使い、暗い色ではL値に応じて最大2倍まで広げます。",
+        en: "The values above are the base limits for each slider position. Bright colors use the shown value, and darker colors expand it up to 2x based on L*."
+    },
+    kBoost: { ja: "Kブースト", en: "K boost" },
+    kBoostHelp: {
+        ja: "K+最大時だけ有効です。KのみでL値に近い明度へ変換し、a*/b*の差は暗い色ほど大きく許容します。L=100では10、L=0に近づくほど制限なしになります。",
+        en: "Available only at maximum K+. Converts colors to K only by matching L*. The allowed a*/b* difference grows as colors get darker: 10 at L*=100 and unlimited near L*=0."
+    },
+    protectLightColors: { ja: "薄い色を保護", en: "Protect light colors" },
+    protectLightColorsHelp: {
+        ja: "K+側で有効です。明るく色味のある薄い色で、CMYが減ってもKが十分増えない場合は、CMYを消す変換を採用しません。",
+        en: "Available on the K+ side. For light colors with visible chroma, rejects conversions that remove CMY without adding enough K."
     },
     cmyKBalanceSliderHelp: {
-        ja: "中央は変更なしです。K-側はKを減らしてCMYで補完し、K+側はCMYを減らしてKで補完します。中央から動かすほど、⊿E76での許容色差が大きくなります。",
-        en: "Center leaves the result unchanged. K- reduces K and compensates with CMY; K+ reduces CMY and compensates with K. The farther the slider moves from center, the larger the allowed color difference in Delta E 76 becomes."
+        ja: "中央は変更なしです。K-側はKを減らしてCMYで補完し、K+側はCMYを減らしてKで補完します。中央から動かすほど許容色差が大きくなり、暗い色ではL値に応じて最大2倍まで広がります。",
+        en: "Center leaves the result unchanged. K- reduces K and compensates with CMY; K+ reduces CMY and compensates with K. Moving away from center allows more color difference, expanding up to 2x for darker colors based on L*."
     },
     cancel: { ja: "キャンセル", en: "Cancel" },
     requireCMYK: { ja: "CMYKドキュメントで実行してください", en: "Run this script in a CMYK document." },
@@ -185,6 +195,14 @@ var CMY_K_BALANCE_DE_BASE = 1.5;
 var CMY_K_BALANCE_DE_RANGE = 8.5;
 var CMY_K_BALANCE_REFINE_PASSES = 4;
 var CMY_K_BALANCE_K_REDUCTION_FACTORS = [1.0, 0.75, 0.5, 0.33, 0.2, 0.1, 0.05];
+var DEFAULT_K_BOOST_ENABLED = false;
+var K_BOOST_AB_DELTA_AT_L100 = 10.0;
+var K_BOOST_BALANCE_VALUE = 100;
+var DEFAULT_LIGHT_COLOR_PROTECT_ENABLED = false;
+var LIGHT_COLOR_PROTECT_L_MIN = 80;
+var LIGHT_COLOR_PROTECT_CHROMA_MIN = 2.0;
+var LIGHT_COLOR_PROTECT_CMY_REMOVED_MIN = 1.0;
+var LIGHT_COLOR_PROTECT_K_REPLACEMENT_RATIO_MAX = 0.15;
 var DEFAULT_SATURATION_BOOST_ENABLED = false;
 var DEFAULT_SATURATION_BOOST_PCT = 5;
 var ESTIMATE_FIXED_SECONDS = 3.2;
@@ -194,6 +212,8 @@ var ESTIMATE_ASSUMED_CACHE_RATE = 0.2;
 var SATURATION_BOOST_FULL_CHROMA = 20; // C*ab がこの値以上なら指定どおりの彩度補正
 var CMY_K_BALANCE_ENABLED = DEFAULT_CMY_K_BALANCE_ENABLED; // ScriptUIで「CMYとKのバランス」がオンのときに有効化
 var CMY_K_BALANCE_VALUE = DEFAULT_CMY_K_BALANCE_VALUE; // -100..100、負はCMY寄り、正はK寄り
+var K_BOOST_ENABLED = DEFAULT_K_BOOST_ENABLED; // K+最大時、低彩度色をKのみで明度合わせする
+var LIGHT_COLOR_PROTECT_ENABLED = DEFAULT_LIGHT_COLOR_PROTECT_ENABLED; // K+側で薄い有彩色のCMY消失を抑える
 var SATURATION_BOOST_ENABLED = DEFAULT_SATURATION_BOOST_ENABLED; // ScriptUIで「彩度補正」がオンのときに有効化
 var SATURATION_BOOST_PCT = DEFAULT_SATURATION_BOOST_PCT; // a*, b* をこの割合だけ拡大
 
@@ -599,17 +619,52 @@ function showConvertOptionsDialog(stats) {
     labelAllowedColorDifference.helpTip = uiText('allowedColorDifferenceHelp');
     balanceToleranceDisplayTargets.push(labelAllowedColorDifference);
 
+    var kBoostGroup = balancePanel.add('group');
+    kBoostGroup.orientation = 'row';
+    kBoostGroup.alignment = 'fill';
+    kBoostGroup.alignChildren = ['center', 'center'];
+    kBoostGroup.margins = [0, 6, 0, 0];
+    kBoostGroup.spacing = 4;
+    kBoostGroup.helpTip = uiText('kBoostHelp');
+    var chkKBoost = kBoostGroup.add('checkbox', undefined, uiText('kBoost'));
+    chkKBoost.alignment = ['center', 'center'];
+    chkKBoost.value = false;
+    chkKBoost.helpTip = uiText('kBoostHelp');
+
+    var protectLightColorsGroup = balancePanel.add('group');
+    protectLightColorsGroup.orientation = 'row';
+    protectLightColorsGroup.alignment = 'fill';
+    protectLightColorsGroup.alignChildren = ['center', 'center'];
+    protectLightColorsGroup.margins = [0, 2, 0, 0];
+    protectLightColorsGroup.spacing = 4;
+    protectLightColorsGroup.helpTip = uiText('protectLightColorsHelp');
+    var chkProtectLightColors = protectLightColorsGroup.add('checkbox', undefined, uiText('protectLightColors'));
+    chkProtectLightColors.alignment = ['center', 'center'];
+    chkProtectLightColors.value = false;
+    chkProtectLightColors.helpTip = uiText('protectLightColorsHelp');
+
+    var enableDynamicDialogLayout = false;
     function updateBalanceToleranceDisplay() {
-        var isActive = snapToStep(readSliderInt(sliderCMYKBalance, 0), balanceSliderStep, -100, 100) !== 0;
+        var balanceValue = snapToStep(readSliderInt(sliderCMYKBalance, 0), balanceSliderStep, -100, 100);
+        var isActive = balanceValue !== 0;
+        var enableKBoost = balanceValue === K_BOOST_BALANCE_VALUE;
+        var enableProtectLightColors = balanceValue > 0;
         setControlsEnabled(balanceToleranceDisplayTargets, isActive);
+        chkKBoost.enabled = enableKBoost;
+        if (!enableKBoost) chkKBoost.value = false;
+        chkProtectLightColors.enabled = enableProtectLightColors;
+        if (!enableProtectLightColors) chkProtectLightColors.value = false;
+        if (enableDynamicDialogLayout) {
+            try {
+                dlg.layout.layout(true);
+            } catch (e) { }
+        }
     }
 
     function updateEnabled() {
         setControlsEnabled(satToggleTargets, chkSatBoost.value);
     }
     chkSatBoost.onClick = updateEnabled;
-    updateEnabled();
-    updateBalanceToleranceDisplay();
 
     // 対象数と予測時間
     var infoPanel = dlg.add('panel', undefined, uiText('info'));
@@ -673,8 +728,14 @@ function showConvertOptionsDialog(stats) {
         enableSaturationBoost: false,
         saturationBoostPct: SATURATION_BOOST_PCT,
         enableCMYKBalance: false,
-        cmyKBalanceValue: CMY_K_BALANCE_VALUE
+        cmyKBalanceValue: CMY_K_BALANCE_VALUE,
+        enableKBoost: false,
+        enableLightColorProtect: false
     };
+
+    updateEnabled();
+    updateBalanceToleranceDisplay();
+    enableDynamicDialogLayout = true;
 
     var ret = dlg.show();
     if (ret !== 1) {
@@ -686,6 +747,8 @@ function showConvertOptionsDialog(stats) {
     result.saturationBoostPct = readDropdownInt(ddSat, result.saturationBoostPct);
     result.cmyKBalanceValue = snapToStep(readSliderInt(sliderCMYKBalance, result.cmyKBalanceValue), balanceSliderStep, -100, 100);
     result.enableCMYKBalance = result.cmyKBalanceValue !== 0;
+    result.enableKBoost = result.cmyKBalanceValue === K_BOOST_BALANCE_VALUE && chkKBoost.value;
+    result.enableLightColorProtect = result.cmyKBalanceValue > 0 && chkProtectLightColors.value;
     return result;
 }
 
@@ -873,6 +936,12 @@ function labChroma(lab) {
     return Math.sqrt(lab.a * lab.a + lab.b * lab.b);
 }
 
+function labABDelta(a, b) {
+    var da = a.a - b.a;
+    var db = a.b - b.b;
+    return Math.sqrt(da * da + db * db);
+}
+
 function smoothUnit(t) {
     if (t <= 0) return 0;
     if (t >= 1) return 1;
@@ -891,14 +960,6 @@ function copyCMYK(cmyk) {
         m: cmyk.m,
         y: cmyk.y,
         k: cmyk.k
-    };
-}
-
-function copyLab(lab) {
-    return {
-        L: lab.L,
-        a: lab.a,
-        b: lab.b
     };
 }
 
@@ -1136,10 +1197,10 @@ function findCMYBalanceResult(adj, targetLab, amount) {
         if (!bestReduced || candidate.k < bestReduced.k || (candidate.k === bestReduced.k && candidate.dE < bestReduced.dE)) {
             bestReduced = candidate;
         }
-        if (acceptCMYKBalanceResult(adj, candidate, amount)) return candidate;
+        if (acceptCMYKBalanceResult(adj, candidate, amount, targetLab)) return candidate;
     }
 
-    return bestReduced && acceptCMYKBalanceResult(adj, bestReduced, amount) ? bestReduced : adj;
+    return bestReduced && acceptCMYKBalanceResult(adj, bestReduced, amount, targetLab) ? bestReduced : adj;
 }
 
 function buildKRefineMask() {
@@ -1174,11 +1235,38 @@ function refineWithMaskLSPasses(start, targetLab, allowed, passes) {
     return best;
 }
 
-function acceptCMYKBalanceResult(base, candidate, amount) {
+function cmyKBalanceToleranceMultiplier(targetLab) {
+    if (!targetLab) return 1;
+    var L = Number(targetLab.L);
+    if (isNaN(L)) return 1;
+    if (L <= 0) return 2;
+    if (L >= 100) return 1;
+    return 1 + smoothUnit((100 - L) / 100);
+}
+
+function acceptCMYKBalanceResult(base, candidate, amount, targetLab) {
     if (!candidate) return false;
     if (candidate.dE <= base.dE) return true;
-    var limit = CMY_K_BALANCE_DE_BASE + (CMY_K_BALANCE_DE_RANGE * amount);
+    var limit = (CMY_K_BALANCE_DE_BASE + (CMY_K_BALANCE_DE_RANGE * amount)) * cmyKBalanceToleranceMultiplier(targetLab);
     return candidate.dE <= limit && (candidate.dE - base.dE) <= limit;
+}
+
+function cmyTotal(cmyk) {
+    if (!cmyk) return 0;
+    return clampPct(cmyk.c) + clampPct(cmyk.m) + clampPct(cmyk.y);
+}
+
+function shouldProtectLightColorFromKBalance(base, candidate, targetLab) {
+    if (!LIGHT_COLOR_PROTECT_ENABLED || !base || !candidate || !targetLab) return false;
+    if (targetLab.L < LIGHT_COLOR_PROTECT_L_MIN) return false;
+    if (labChroma(targetLab) < LIGHT_COLOR_PROTECT_CHROMA_MIN) return false;
+
+    var removedCMY = cmyTotal(base) - cmyTotal(candidate);
+    if (removedCMY < LIGHT_COLOR_PROTECT_CMY_REMOVED_MIN) return false;
+
+    var addedK = Math.max(0, candidate.k - base.k);
+    var replacementRatio = addedK / Math.max(removedCMY, 1);
+    return replacementRatio < LIGHT_COLOR_PROTECT_K_REPLACEMENT_RATIO_MAX;
 }
 
 function applySaturationBoostToLab(lab, pct) {
@@ -1213,7 +1301,8 @@ function applyCMYKBalance(adj, targetLab) {
         out.m = clampPct(out.m * cmyScale);
         out.y = clampPct(out.y * cmyScale);
         var kRes = refineWithMaskLSPasses(out, targetLab, buildKRefineMask(), CMY_K_BALANCE_REFINE_PASSES);
-        return acceptCMYKBalanceResult(adj, kRes, amount) ? kRes : adj;
+        if (shouldProtectLightColorFromKBalance(adj, kRes, targetLab)) return adj;
+        return acceptCMYKBalanceResult(adj, kRes, amount, targetLab) ? kRes : adj;
     } else {
         return findCMYBalanceResult(adj, targetLab, amount);
     }
@@ -1262,6 +1351,43 @@ function refineKOnly(targetLab) {
     }
 
     return makeLabResultFromCMYK(finalizeCMYK(best), targetLab);
+}
+
+function findKOnlyByLightness(targetLab) {
+    var bestK = 0;
+    var bestScore = Math.abs(targetLab.L - cmykToLab(0, 0, 0, bestK).L);
+
+    for (var k = 1; k <= 100; k++) {
+        var lab = cmykToLab(0, 0, 0, k);
+        var score = Math.abs(targetLab.L - lab.L);
+        if (score < bestScore || (score === bestScore && k > bestK)) {
+            bestK = k;
+            bestScore = score;
+        }
+    }
+
+    return makeLabResultFromCMYK({
+        c: 0,
+        m: 0,
+        y: 0,
+        k: bestK
+    }, targetLab);
+}
+
+function buildKBoostResult(targetLab) {
+    if (!K_BOOST_ENABLED || CMY_K_BALANCE_VALUE !== K_BOOST_BALANCE_VALUE) return null;
+    var kOnly = findKOnlyByLightness(targetLab);
+    if (labABDelta(targetLab, kOnly) > kBoostABDeltaLimit(targetLab)) return null;
+    return kOnly;
+}
+
+function kBoostABDeltaLimit(targetLab) {
+    if (!targetLab) return K_BOOST_AB_DELTA_AT_L100;
+    var L = Number(targetLab.L);
+    if (isNaN(L)) return K_BOOST_AB_DELTA_AT_L100;
+    if (L <= 0) return Number.POSITIVE_INFINITY;
+    if (L > 100) L = 100;
+    return K_BOOST_AB_DELTA_AT_L100 * (100 / L);
 }
 
 function getDirectPatternInfo(pattern) {
@@ -1717,6 +1843,23 @@ function getCachedAdjustedResult(orig) {
 function computeAdjustedResult(orig, useCache) {
     var labA = cmykToLab(orig.c, orig.m, orig.y, orig.k);
     var targetLab = (SATURATION_BOOST_ENABLED && SATURATION_BOOST_PCT > 0) ? applySaturationBoostToLab(labA, SATURATION_BOOST_PCT) : labA;
+    var kBoostResult = buildKBoostResult(targetLab);
+
+    if (kBoostResult) {
+        var kBoostOut = finalizeCMYK(kBoostResult);
+        if (!shouldProtectLightColorFromKBalance(orig, kBoostOut, targetLab)) {
+            var kBoostChanged = !isSameCMYK(orig, kBoostOut);
+            if (useCache) {
+                cachePutResult(orig, kBoostOut, kBoostChanged);
+            }
+            trimLabCacheAfterSearch();
+
+            if (!kBoostChanged) {
+                return makeColorProcessResult(false, 'same');
+            }
+            return makeColorProcessResult(true, null, kBoostOut);
+        }
+    }
 
     var adj = adjustDirectPatterned(orig, targetLab);
     if (!adj) {
@@ -1949,23 +2092,8 @@ function countTextFrameAttempts(tf) {
     return 2;
 }
 
-function countPageItemAttempts(it) {
-    var cnt = 0;
-    try {
-        if (it.filled) cnt += 1;
-    } catch (e) { }
-    try {
-        if (it.stroked) cnt += 1;
-    } catch (e) { }
-    return cnt;
-}
-
 function applySelectionArtItem(it) {
     return (it.typename === 'TextFrame') ? processTextFrameColors(it).changes : processPageItemColors(it).changes;
-}
-
-function countSelectionArtItemAttempts(it) {
-    return (it.typename === 'TextFrame') ? countTextFrameAttempts(it) : countPageItemAttempts(it);
 }
 
 function makeSelectionArtItemEntry(it) {
@@ -2113,6 +2241,8 @@ function cleanupAfterRun() {
         gSkipCount = 0;
         CMY_K_BALANCE_ENABLED = DEFAULT_CMY_K_BALANCE_ENABLED;
         CMY_K_BALANCE_VALUE = DEFAULT_CMY_K_BALANCE_VALUE;
+        K_BOOST_ENABLED = DEFAULT_K_BOOST_ENABLED;
+        LIGHT_COLOR_PROTECT_ENABLED = DEFAULT_LIGHT_COLOR_PROTECT_ENABLED;
         SATURATION_BOOST_ENABLED = DEFAULT_SATURATION_BOOST_ENABLED;
         SATURATION_BOOST_PCT = DEFAULT_SATURATION_BOOST_PCT;
         $.gc();
@@ -2147,6 +2277,8 @@ function cleanupAfterRun() {
         SATURATION_BOOST_PCT = opt.saturationBoostPct;
         CMY_K_BALANCE_ENABLED = opt.enableCMYKBalance;
         CMY_K_BALANCE_VALUE = opt.cmyKBalanceValue;
+        K_BOOST_ENABLED = opt.enableKBoost;
+        LIGHT_COLOR_PROTECT_ENABLED = opt.enableLightColorProtect;
 
         gProgress = createProgressBar(stats.planned > 0 ? stats.planned : 100);
         var t0 = nowMs();

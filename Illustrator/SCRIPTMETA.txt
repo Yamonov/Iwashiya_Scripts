@@ -1,7 +1,7 @@
 SCRIPTMETA-DIST-BEGIN
 
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
-Version=2.1.8
+Version=2.1.9
 
 Script-ID=org.iwashi.IllustratorCrop_RelinkFitter
 Version=0.7
@@ -29,4 +29,5 @@ Ver 1.2:テンキーで変形基準点、変形関連設定、表示関連設定
 Ver 1:テンキー入力で変形基準点とIllustratorの各種設定を即時変更するUIを追加。
 
 ## org.iwashi.CMYKto100GCRConverter_ai
+Ver 2.1.9:Kブーストと薄い色を保護を追加し、Kスライダの許容色差をL値に応じて調整。TIPヘルプを更新。
 Ver 2.1.8:escでキャンセル可能に。速度への影響を最小にしました。

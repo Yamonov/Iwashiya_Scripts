@@ -81,4 +81,7 @@ Version=0.5
 Script-ID=org.iwashi.LayerColorSelector
 Version=1.1
 
+Script-ID=org.iwashi.AdjustmentLayerPanel
+Version=1
+
 SCRIPTMETA-DIST-END
