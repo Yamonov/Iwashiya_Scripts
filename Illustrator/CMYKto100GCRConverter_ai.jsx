@@ -3,11 +3,11 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
-Version=2.1.9
+Version=2.2
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=色を変えずにCMYK値を調整
 Author=Murakami Yoshiteru
-Release-Date=2026-07-07
+Release-Date=2026-07-09
 Target-App=Illustrator
 Edit-Password-SHA256=oS5aCLoTCKedGLZN:3d8282cb048f8c02d5bf1dca0493471b70fda75c2a3131e4cb0c10b4c1688127
 Description-BEGIN
@@ -55,7 +55,7 @@ function formatScriptVersionOnly(meta) {
 var YamoScriptMeta = readSelfHeaderMeta();
 var YamoScriptVersion = formatScriptVersion(YamoScriptMeta);
 var YamoScriptVersionOnly = formatScriptVersionOnly(YamoScriptMeta);
-//var YAMO_LOCALE_OVERRIDE = "ja"; // テスト時のみ "ja" または "en" を指定
+//var YAMO_LOCALE_OVERRIDE = "en"; // テスト時のみ "ja" または "en" を指定
 
 var UI_TEXT = {
     progressTitle: { ja: "CMYK値を整理中...", en: "Adjusting CMYK..." },
@@ -64,13 +64,14 @@ var UI_TEXT = {
     scanCancelHelp: { ja: "Escでキャンセル", en: "Press Esc to cancel" },
     optionsTitle: { ja: "変換オプション", en: "Conversion Options" },
     titleSeparator: { ja: "　｜　", en: " | " },
-    targetCount: { ja: "対象数{count}", en: "Targets {count}" },
+    targetCount: { ja: "対象数: {count}", en: "Targets: {count}" },
     unsupportedCount: { ja: "（未対応{count}）", en: " (unsupported {count})" },
     targetCountHelp: {
-        ja: "対象数は、処理対象と未対応オブジェクトの合計です。未対応例: グラデーションメッシュ、ブレンド、ラスタ画像/配置画像、シンボル、グラフ、その他プラグイン/特殊オブジェクトなど。",
-        en: "Targets include processable and unsupported objects. Unsupported examples: gradient meshes, blends, raster/placed images, symbols, graphs, and other plugin or special objects."
+        ja: "対象数は、処理対象と未対応オブジェクトの合計です。未対応例: グラデーションメッシュ、ラスタ画像/配置画像、シンボル、グラフ、プラグイン・特殊オブジェクト（ブレンド等）など。",
+        en: "Targets include processable and unsupported objects. Unsupported examples: gradient meshes, raster/placed images, symbols, graphs, and plugin/special objects (such as blends)."
     },
     info: { ja: "情報", en: "Info" },
+    optionGroup: { ja: "オプション", en: "Options" },
     estimateTime: { ja: "予測時間", en: "Estimated time" },
     estimateHelp: {
         ja: "使用色数とキャッシュ利用数で変わるため、目安です。キャッシュ利用率20%程度で計算しています。",
@@ -110,12 +111,23 @@ var UI_TEXT = {
     cancel: { ja: "キャンセル", en: "Cancel" },
     requireCMYK: { ja: "CMYKドキュメントで実行してください", en: "Run this script in a CMYK document." },
     requireSelection: { ja: "選択してから実行してください", en: "Select objects before running this script." },
-    done: { ja: "完了", en: "Done" },
+    completionTitle: { ja: "変換処理が完了しました", en: "Conversion complete" },
     selectedObjects: { ja: "選択オブジェクト数", en: "Selected objects" },
+    selectedObjectsUnit: { ja: "件", en: "objects" },
     updatedColors: { ja: "変更色数", en: "Updated colors" },
     processingTime: { ja: "処理時間", en: "Processing time" },
     cacheHitRate: { ja: "キャッシュヒット率", en: "Cache hit rate" },
     skippedCount: { ja: "未適用件数", en: "Skipped items" },
+    skippedCountUnit: { ja: "件", en: "items" },
+    selectSkippedObjects: { ja: "未適用オブジェクトを選択する", en: "Select unapplied objects" },
+    selectSkippedObjectsHelp: {
+        ja: "処理できなかったオブジェクトや未対応オブジェクトを、完了後に選択します。未適用オブジェクトがない場合は選択を解除します。",
+        en: "After conversion, selects objects that could not be processed or are unsupported. If there are no unapplied objects, the selection is cleared."
+    },
+    skippedObjectsSelected: {
+        ja: "未適用オブジェクトを選択しました。分割・拡張が可能なオブジェクトは処理してから、再度実行してください。",
+        en: "Unapplied objects were selected. For objects that can be divided or expanded, process them first and run the script again."
+    },
     secondsUnit: { ja: "秒", en: "sec" },
     timeSeconds: { ja: "約{sec}秒", en: "about {sec} sec" },
     timeMinutes: { ja: "約{min}分", en: "about {min} min" },
@@ -235,17 +247,154 @@ var K_ONLY_SEED = { c: 0, m: 0, y: 0, k: 50 };
 // 進行状況バー（ScriptUI）: 幅400px、分母は動的に+10%
 var gProgress = null;
 var gSkipCount = 0;
+var gSkippedItems = [];
+var gSkipBreakdown = [];
 var USER_CANCELLED_ERROR_NAME = "YamoUserCancelled";
 var SCAN_STATUS_CHECK_EVERY = 50;
 var PROGRESS_STATUS_CHECK_EVERY = 100;
 var PROGRESS_CANCEL_CHECK_EVERY_UPDATES = 10;
+var COMPLETION_METRIC_LEFT_MIN_WIDTH = 190;
+var COMPLETION_METRIC_RIGHT_MIN_WIDTH = 150;
+var COMPLETION_SKIPPED_PANEL_MIN_WIDTH = 340;
+var COMPLETION_TEXT_PADDING_WIDTH = 34;
+var COMPLETION_TEXT_LINE_HEIGHT = 17;
+var COMPLETION_TEXT_HEIGHT_PADDING = 6;
+var UNSUPPORTED_OBJECT_TYPE_LABELS = {
+    MeshItem: { ja: "グラデーションメッシュ", en: "Gradient mesh" },
+    RasterItem: { ja: "ラスタ画像", en: "Raster image" },
+    PlacedItem: { ja: "配置画像", en: "Placed image" },
+    SymbolItem: { ja: "シンボル", en: "Symbol" },
+    GraphItem: { ja: "グラフ", en: "Graph" },
+    PluginItem: { ja: "プラグイン・特殊オブジェクト（ブレンド等）", en: "Plugin/special object (such as blends)" },
+    NonNativeItem: { ja: "非ネイティブオブジェクト", en: "Non-native object" },
+    LegacyTextItem: { ja: "旧テキスト", en: "Legacy text" },
+    GroupItem: { ja: "グループ（内部取得不可）", en: "Group (contents unavailable)" },
+    CompoundPathItem: { ja: "複合パス（内部取得不可）", en: "Compound path (contents unavailable)" }
+};
+var SKIP_REASON_LABELS = {
+    nonCMYK: { ja: "非CMYKカラー", en: "Non-CMYK color" },
+    noCandidate: { ja: "許容色差内の変換候補なし", en: "No candidate within allowed difference" },
+    spotWriteFailed: { ja: "スポットカラー更新不可", en: "Spot color update failed" },
+    colorReadFailed: { ja: "カラー取得不可", en: "Color read failed" },
+    textAttributesReadFailed: { ja: "テキスト属性取得不可", en: "Text attributes unavailable" },
+    gradientStopFailed: { ja: "グラデーション停止色取得不可", en: "Gradient stop color failed" },
+    fillStateReadFailed: { ja: "塗り情報取得不可", en: "Fill state unavailable" },
+    strokeStateReadFailed: { ja: "線情報取得不可", en: "Stroke state unavailable" },
+    unknown: { ja: "処理不可", en: "Unprocessable" }
+};
+
+function localizedLabel(entry) {
+    if (!entry) return "";
+    var locale = currentLocaleCode();
+    return entry[locale] || entry.ja || entry.en || "";
+}
+
+function itemTypeName(item) {
+    try {
+        if (item && item.typename) return String(item.typename);
+    } catch (e) { }
+    return "Unknown";
+}
+
+function unsupportedObjectTypeLabel(typeName) {
+    var label = localizedLabel(UNSUPPORTED_OBJECT_TYPE_LABELS[typeName]);
+    if (label) return label;
+    return currentLocaleCode() === "ja" ? "未対応オブジェクト（" + typeName + "）" : "Unsupported object (" + typeName + ")";
+}
+
+function skipReasonLabel(reason) {
+    return localizedLabel(SKIP_REASON_LABELS[reason]) || localizedLabel(SKIP_REASON_LABELS.unknown);
+}
+
+function addSkipBreakdownEntry(entries, key, label, count) {
+    if (!entries) return;
+    count = count || 1;
+    for (var i = 0, n = entries.length; i < n; i++) {
+        if (entries[i].key === key) {
+            entries[i].count += count;
+            return;
+        }
+    }
+    entries.push({
+        key: key,
+        label: label,
+        count: count
+    });
+}
+
+function addSkipBreakdownEntries(target, source) {
+    if (!target || !source) return target;
+    for (var i = 0, n = source.length; i < n; i++) {
+        addSkipBreakdownEntry(target, source[i].key, source[i].label, source[i].count);
+    }
+    return target;
+}
+
+function addUnsupportedBreakdownEntry(entries, item) {
+    var typeName = itemTypeName(item);
+    addSkipBreakdownEntry(entries, "unsupported:" + typeName, unsupportedObjectTypeLabel(typeName), 1);
+}
 
 function resetSkipCount() {
     gSkipCount = 0;
+    gSkippedItems = [];
+    gSkipBreakdown = [];
 }
 
-function countSkip() {
+function markSkippedItem(item) {
+    if (!item) return;
+    for (var i = 0, n = gSkippedItems.length; i < n; i++) {
+        if (gSkippedItems[i] === item) return;
+    }
+    gSkippedItems.push(item);
+}
+
+function countSkip(item, reason) {
     gSkipCount++;
+    markSkippedItem(item);
+    reason = reason || "unknown";
+    addSkipBreakdownEntry(gSkipBreakdown, "process:" + reason, skipReasonLabel(reason), 1);
+}
+
+function addUniqueItem(items, item) {
+    if (!item) return;
+    for (var i = 0, n = items.length; i < n; i++) {
+        if (items[i] === item) return;
+    }
+    items.push(item);
+}
+
+function addUniqueItems(items, sourceItems) {
+    if (!sourceItems) return items;
+    for (var i = 0, n = sourceItems.length; i < n; i++) {
+        addUniqueItem(items, sourceItems[i]);
+    }
+    return items;
+}
+
+function clearSelection(doc) {
+    try {
+        doc.selection = null;
+    } catch (e) { }
+    try {
+        app.selection = null;
+    } catch (e2) { }
+    try {
+        app.executeMenuCommand('deselectall');
+    } catch (e3) { }
+}
+
+function selectItems(doc, items) {
+    var selected = 0;
+    clearSelection(doc);
+
+    for (var i = 0, n = items ? items.length : 0; i < n; i++) {
+        try {
+            items[i].selected = true;
+            selected++;
+        } catch (e2) { }
+    }
+    return selected;
 }
 
 function isEscapeKeyName(keyName) {
@@ -495,6 +644,33 @@ function setStaticTextMuted(st) {
     } catch (e) { }
 }
 
+function setControlBold(control) {
+    var fontName = "dialog";
+    var fontSize = 12;
+    try {
+        var font = control.graphics.font;
+        fontName = font && font.name ? font.name : fontName;
+        fontSize = font && font.size ? font.size : fontSize;
+    } catch (e) { }
+    try {
+        if (ScriptUI.FontStyle && ScriptUI.FontStyle.BOLD) {
+            control.graphics.font = ScriptUI.newFont(fontName, ScriptUI.FontStyle.BOLD, fontSize);
+            return;
+        }
+    } catch (e2) { }
+    try {
+        control.graphics.font = ScriptUI.newFont(fontName, "bold", fontSize);
+        return;
+    } catch (e3) { }
+    try {
+        control.graphics.font = ScriptUI.newFont(fontName, "BOLD", fontSize);
+        return;
+    } catch (e4) { }
+    try {
+        control.graphics.font = ScriptUI.newFont("dialog", "bold", fontSize);
+    } catch (e5) { }
+}
+
 // 「変換オプション」ダイアログ
 function formatTargetCountText(targetCount, unsupportedCount) {
     var s = uiFormat('targetCount', { count: targetCount });
@@ -521,6 +697,7 @@ function showConvertOptionsDialog(stats) {
     var balanceSliderWidth = 146;
     var balanceSliderStep = 50;
     var allowedColorDifferenceLabelExtraWidth = 72;
+    var balanceOptionIndent = balanceSideLabelWidth - 18;
 
     var satPanel = dlg.add('panel', undefined, uiText('saturationBoost'));
     satPanel.alignment = 'fill';
@@ -621,25 +798,27 @@ function showConvertOptionsDialog(stats) {
 
     var kBoostGroup = balancePanel.add('group');
     kBoostGroup.orientation = 'row';
-    kBoostGroup.alignment = 'fill';
-    kBoostGroup.alignChildren = ['center', 'center'];
+    kBoostGroup.alignment = 'left';
+    kBoostGroup.alignChildren = ['left', 'center'];
     kBoostGroup.margins = [0, 6, 0, 0];
     kBoostGroup.spacing = 4;
     kBoostGroup.helpTip = uiText('kBoostHelp');
+    kBoostGroup.add('statictext', [0, 0, balanceOptionIndent, 14], '');
     var chkKBoost = kBoostGroup.add('checkbox', undefined, uiText('kBoost'));
-    chkKBoost.alignment = ['center', 'center'];
+    chkKBoost.alignment = ['left', 'center'];
     chkKBoost.value = false;
     chkKBoost.helpTip = uiText('kBoostHelp');
 
     var protectLightColorsGroup = balancePanel.add('group');
     protectLightColorsGroup.orientation = 'row';
-    protectLightColorsGroup.alignment = 'fill';
-    protectLightColorsGroup.alignChildren = ['center', 'center'];
+    protectLightColorsGroup.alignment = 'left';
+    protectLightColorsGroup.alignChildren = ['left', 'center'];
     protectLightColorsGroup.margins = [0, 2, 0, 0];
     protectLightColorsGroup.spacing = 4;
     protectLightColorsGroup.helpTip = uiText('protectLightColorsHelp');
+    protectLightColorsGroup.add('statictext', [0, 0, balanceOptionIndent, 14], '');
     var chkProtectLightColors = protectLightColorsGroup.add('checkbox', undefined, uiText('protectLightColors'));
-    chkProtectLightColors.alignment = ['center', 'center'];
+    chkProtectLightColors.alignment = ['left', 'center'];
     chkProtectLightColors.value = false;
     chkProtectLightColors.helpTip = uiText('protectLightColorsHelp');
 
@@ -665,6 +844,28 @@ function showConvertOptionsDialog(stats) {
         setControlsEnabled(satToggleTargets, chkSatBoost.value);
     }
     chkSatBoost.onClick = updateEnabled;
+
+    // 未適用オブジェクト選択オプション
+    var optionPanel = dlg.add('panel', undefined, uiText('optionGroup'));
+    optionPanel.alignment = 'fill';
+    optionPanel.orientation = 'column';
+    optionPanel.alignChildren = ['left', 'center'];
+    optionPanel.preferredSize.width = optionPanelWidth;
+    optionPanel.margins = infoPanelMargins;
+    optionPanel.spacing = 2;
+    optionPanel.helpTip = uiText('selectSkippedObjectsHelp');
+
+    var skippedObjectsOptionGroup = optionPanel.add('group');
+    skippedObjectsOptionGroup.orientation = 'row';
+    skippedObjectsOptionGroup.alignment = 'fill';
+    skippedObjectsOptionGroup.alignChildren = ['left', 'center'];
+    skippedObjectsOptionGroup.preferredSize.width = optionPanelWidth - 32;
+    skippedObjectsOptionGroup.margins = 0;
+    skippedObjectsOptionGroup.helpTip = uiText('selectSkippedObjectsHelp');
+    var chkSelectSkippedObjects = skippedObjectsOptionGroup.add('checkbox', undefined, uiText('selectSkippedObjects'));
+    chkSelectSkippedObjects.alignment = ['left', 'center'];
+    chkSelectSkippedObjects.value = true;
+    chkSelectSkippedObjects.helpTip = uiText('selectSkippedObjectsHelp');
 
     // 対象数と予測時間
     var infoPanel = dlg.add('panel', undefined, uiText('info'));
@@ -730,7 +931,8 @@ function showConvertOptionsDialog(stats) {
         enableCMYKBalance: false,
         cmyKBalanceValue: CMY_K_BALANCE_VALUE,
         enableKBoost: false,
-        enableLightColorProtect: false
+        enableLightColorProtect: false,
+        selectSkippedObjects: true
     };
 
     updateEnabled();
@@ -749,6 +951,7 @@ function showConvertOptionsDialog(stats) {
     result.enableCMYKBalance = result.cmyKBalanceValue !== 0;
     result.enableKBoost = result.cmyKBalanceValue === K_BOOST_BALANCE_VALUE && chkKBoost.value;
     result.enableLightColorProtect = result.cmyKBalanceValue > 0 && chkProtectLightColors.value;
+    result.selectSkippedObjects = chkSelectSkippedObjects.value;
     return result;
 }
 
@@ -846,6 +1049,18 @@ function processedSpotResultFromColor(color) {
         }
     } catch (e) { }
     return null;
+}
+
+function isGrayColorObject(color) {
+    if (!color) return false;
+    if (color.typename === 'GrayColor') return true;
+    if (color.typename === 'SpotColor') {
+        try {
+            var sp = color.spot;
+            return !!(sp && sp.color && sp.color.typename === 'GrayColor');
+        } catch (e) { }
+    }
+    return false;
 }
 
 function gradientKey(gradient) {
@@ -1918,8 +2133,10 @@ function processColorObject(color) {
     var processedSpot = processedSpotResultFromColor(color);
     if (processedSpot) return processedSpot;
 
+    if (isGrayColorObject(color)) return makeColorProcessResult(false, 'ignoredGray');
+
     var orig = extractCMYK(color);
-    if (!orig) return makeColorProcessResult(false, 'nonCMYK'); // spot/gray/RGB等
+    if (!orig) return makeColorProcessResult(false, 'nonCMYK'); // spot/RGB等
 
     // Spot（グローバルCMYK）の場合は、スウォッチ（Spot）のベース色を書き換える。オブジェクト側は触らない。
     if (orig._isSpot && orig._spotRef) {
@@ -1929,10 +2146,10 @@ function processColorObject(color) {
     return buildAdjustedColorResult(orig, true);
 }
 
-function applyColorResultToProperty(target, propName, res) {
+function applyColorResultToProperty(target, propName, res, ownerItem) {
     if (!res || !res.changed) {
-        if (res && res.reason && res.reason !== 'same' && res.reason !== 'spotAlreadyProcessed') {
-            countSkip();
+        if (res && res.reason && res.reason !== 'same' && res.reason !== 'spotAlreadyProcessed' && res.reason !== 'ignoredGray') {
+            countSkip(ownerItem || target, res.reason);
         }
         return 0;
     }
@@ -1942,21 +2159,21 @@ function applyColorResultToProperty(target, propName, res) {
     return 1;
 }
 
-function processColorProperty(target, propName, allowGradient) {
+function processColorProperty(target, propName, allowGradient, ownerItem) {
     try {
         var col = target[propName];
         if (!col) return 0;
         if (allowGradient && col.typename === 'GradientColor') {
-            var res = processGradientColor(col);
+            var res = processGradientColor(col, ownerItem || target);
             if (res.changed) target[propName] = col;
             return res.changed;
         }
-        var changed = applyColorResultToProperty(target, propName, processColorObject(col));
+        var changed = applyColorResultToProperty(target, propName, processColorObject(col), ownerItem || target);
         stepProgress(1);
         return changed;
     } catch (e) {
         if (isUserCancelledError(e)) throw e;
-        countSkip();
+        countSkip(ownerItem || target, 'colorReadFailed');
         return 0;
     }
 }
@@ -1968,11 +2185,11 @@ function getTextFrameAttributes(tf) {
     return null;
 }
 
-function processTextAttributesColors(attrs) {
+function processTextAttributesColors(attrs, ownerItem) {
     if (!attrs) return 0;
     var changes = 0;
-    changes += processColorProperty(attrs, 'fillColor', false);
-    changes += processColorProperty(attrs, 'strokeColor', false);
+    changes += processColorProperty(attrs, 'fillColor', false, ownerItem);
+    changes += processColorProperty(attrs, 'strokeColor', false, ownerItem);
     return changes;
 }
 
@@ -1980,18 +2197,18 @@ function processTextAttributesColors(attrs) {
 function processTextFrameColors(tf) {
     var attrs = getTextFrameAttributes(tf);
     if (!attrs) {
-        countSkip();
+        countSkip(tf, 'textAttributesReadFailed');
         return {
             changes: 0
         };
     }
     return {
-        changes: processTextAttributesColors(attrs)
+        changes: processTextAttributesColors(attrs, tf)
     };
 }
 
 // GradientColor を処理（各ストップの CMYK/SpotColor） - カウンタ集計
-function processGradientColor(gradColor) {
+function processGradientColor(gradColor, ownerItem) {
     var g = gradColor.gradient;
     var key = gradientKey(g);
     if (key && processedGradientMap[key]) {
@@ -2006,11 +2223,11 @@ function processGradientColor(gradColor) {
             var stop = stops[i];
             var col = stop.color;
             if (col) {
-                changed += applyColorResultToProperty(stop, 'color', processColorObject(col));
+                changed += applyColorResultToProperty(stop, 'color', processColorObject(col), ownerItem);
             }
         } catch (e) {
             if (isUserCancelledError(e)) throw e;
-            countSkip();
+            countSkip(ownerItem, 'gradientStopFailed');
         }
         stepProgress(1);
     }
@@ -2027,7 +2244,7 @@ function processPageItemColors(item, filled, stroked) {
         try {
             filled = item.filled;
         } catch (e) {
-            countSkip();
+            countSkip(item, 'fillStateReadFailed');
             filled = false;
         }
     }
@@ -2035,12 +2252,12 @@ function processPageItemColors(item, filled, stroked) {
         try {
             stroked = item.stroked;
         } catch (e2) {
-            countSkip();
+            countSkip(item, 'strokeStateReadFailed');
             stroked = false;
         }
     }
-    if (filled) changes += processColorProperty(item, 'fillColor', true);
-    if (stroked) changes += processColorProperty(item, 'strokeColor', true);
+    if (filled) changes += processColorProperty(item, 'fillColor', true, item);
+    if (stroked) changes += processColorProperty(item, 'strokeColor', true, item);
     return {
         changes: changes
     };
@@ -2177,6 +2394,8 @@ function collectSelectionStats(showStatusWindow) {
     var selectedObjectCount = 0;
     var unsupportedObjectCount = 0;
     var items = [];
+    var unsupportedItems = [];
+    var unsupportedBreakdown = [];
     var cancelled = false;
     var statusWindow = showStatusWindow ? createStatusWindow(uiText('scanningSelection'), 220, uiText('scanCancelHelp')) : null;
     try {
@@ -2186,8 +2405,10 @@ function collectSelectionStats(showStatusWindow) {
             selectedObjectCount++;
             planned += entry.attempts;
             if (statusWindow) statusWindow.tick();
-        }, function () {
+        }, function (it) {
             unsupportedObjectCount++;
+            unsupportedItems.push(it);
+            addUnsupportedBreakdownEntry(unsupportedBreakdown, it);
             if (statusWindow) statusWindow.tick();
         });
     } catch (e) {
@@ -2203,6 +2424,8 @@ function collectSelectionStats(showStatusWindow) {
         planned: planned,
         selectedObjectCount: selectedObjectCount,
         unsupportedObjectCount: unsupportedObjectCount,
+        unsupportedItems: unsupportedItems,
+        unsupportedBreakdown: unsupportedBreakdown,
         items: items
     };
 }
@@ -2212,17 +2435,199 @@ function formatPercent(numerator, denominator) {
     return round2((numerator / denominator) * 100) + "%";
 }
 
-function buildResultMessage(selectedObjectCount, plannedCount, appliedInfo, totalSec) {
-    var msg = [];
-    msg.push(uiText('done'));
-    msg.push(uiText('selectedObjects') + ": " + selectedObjectCount);
-    msg.push(uiText('updatedColors') + ": " + appliedInfo.count);
-    msg.push(uiText('processingTime') + ": " + round2(totalSec) + " " + uiText('secondsUnit'));
-    msg.push(uiText('cacheHitRate') + ": " + formatPercent(cacheHitCount, plannedCount));
-    if (gSkipCount > 0) {
-        msg.push(uiText('skippedCount') + ": " + gSkipCount);
+function metricSeparator() {
+    return currentLocaleCode() === "ja" ? "：" : ": ";
+}
+
+function formatMetricText(labelKey, value) {
+    return uiText(labelKey) + metricSeparator() + value;
+}
+
+function formatNumberWithUnit(value, unitKey) {
+    var unit = uiText(unitKey);
+    return currentLocaleCode() === "ja" ? String(value) + unit : String(value) + " " + unit;
+}
+
+function formatCompletionSeconds(totalSec) {
+    return round2(totalSec) + " " + uiText('secondsUnit');
+}
+
+function estimateTextContentWidth(text) {
+    var s = String(text);
+    var width = 0;
+    for (var i = 0, n = s.length; i < n; i++) {
+        var ch = s.charAt(i);
+        if (s.charCodeAt(i) > 255) {
+            width += 15;
+        } else if (ch === " " || ch === "." || ch === "," || ch === ":" || ch === "%" || ch === "i" || ch === "l" || ch === "I") {
+            width += 6;
+        } else {
+            width += 9;
+        }
     }
-    return msg;
+    return width;
+}
+
+function estimateStaticTextWidth(text) {
+    return estimateTextContentWidth(text) + COMPLETION_TEXT_PADDING_WIDTH;
+}
+
+function maxMetricTextWidth(items, minWidth) {
+    var width = minWidth;
+    for (var i = 0, n = items.length; i < n; i++) {
+        width = Math.max(width, estimateStaticTextWidth(items[i]));
+    }
+    return width;
+}
+
+function completionMetricWidths(info) {
+    return {
+        left: maxMetricTextWidth([
+            formatMetricText('selectedObjects', info.selectedObjectCount),
+            formatMetricText('cacheHitRate', info.cacheHitRate)
+        ], COMPLETION_METRIC_LEFT_MIN_WIDTH),
+        right: maxMetricTextWidth([
+            formatMetricText('updatedColors', info.updatedColors),
+            formatMetricText('processingTime', info.processingTime)
+        ], COMPLETION_METRIC_RIGHT_MIN_WIDTH)
+    };
+}
+
+function splitLines(text) {
+    if (!text) return [];
+    return String(text).split(/\r\n|\r|\n/);
+}
+
+function maxTextWidthFromLines(lines, minWidth) {
+    var width = minWidth || 0;
+    for (var i = 0, n = lines ? lines.length : 0; i < n; i++) {
+        width = Math.max(width, estimateStaticTextWidth(lines[i]));
+    }
+    return width;
+}
+
+function estimatedWrappedLineCount(text, width) {
+    var lines = splitLines(text);
+    if (lines.length === 0) return 1;
+    var contentWidth = Math.max(1, width - COMPLETION_TEXT_PADDING_WIDTH);
+    var count = 0;
+    for (var i = 0, n = lines.length; i < n; i++) {
+        count += Math.max(1, Math.ceil(estimateTextContentWidth(lines[i]) / contentWidth));
+    }
+    return count;
+}
+
+function skippedBreakdownLines(details) {
+    var lines = [];
+    if (!details || details.length === 0) return lines;
+    for (var i = 0, n = details.length; i < n; i++) {
+        lines.push(details[i].label + metricSeparator() + formatNumberWithUnit(details[i].count, 'skippedCountUnit'));
+    }
+    return lines;
+}
+
+function completionSkippedPanelWidth(skippedTitle, breakdownLines) {
+    return Math.max(
+        COMPLETION_SKIPPED_PANEL_MIN_WIDTH,
+        estimateStaticTextWidth(skippedTitle),
+        maxTextWidthFromLines(breakdownLines, 0)
+    );
+}
+
+function addHorizontalRule(parent, width) {
+    var ruleGroup = parent.add('group');
+    ruleGroup.orientation = 'row';
+    ruleGroup.alignment = 'fill';
+    ruleGroup.alignChildren = ['fill', 'center'];
+    ruleGroup.preferredSize.width = width;
+    ruleGroup.margins = [0, 2, 0, 2];
+    var rule = ruleGroup.add('panel', undefined, undefined);
+    rule.alignment = ['fill', 'center'];
+    rule.preferredSize.height = 1;
+    return rule;
+}
+
+function addBoldMultilineText(parent, text, width) {
+    var st = parent.add('statictext', undefined, text, { multiline: true });
+    st.alignment = ['fill', 'center'];
+    st.justify = 'left';
+    st.preferredSize.width = width;
+    st.preferredSize.height = Math.max(18, estimatedWrappedLineCount(text, width) * COMPLETION_TEXT_LINE_HEIGHT + COMPLETION_TEXT_HEIGHT_PADDING);
+    setControlBold(st);
+    return st;
+}
+
+function addCompletionMetricCell(parent, labelKey, value, width) {
+    var cell = parent.add('statictext', undefined, formatMetricText(labelKey, value));
+    cell.alignment = ['left', 'center'];
+    cell.justify = 'left';
+    cell.preferredSize.width = width;
+    return cell;
+}
+
+function addCompletionMetricRow(parent, leftKey, leftValue, rightKey, rightValue, widths) {
+    var row = parent.add('group');
+    row.orientation = 'row';
+    row.alignment = 'left';
+    row.alignChildren = ['left', 'center'];
+    row.spacing = 18;
+    row.margins = 0;
+    addCompletionMetricCell(row, leftKey, leftValue, widths.left);
+    addCompletionMetricCell(row, rightKey, rightValue, widths.right);
+    return row;
+}
+
+function showCompletionDialog(info) {
+    var dlg = new Window('dialog', uiText('completionTitle'));
+    dlg.orientation = 'column';
+    dlg.alignChildren = 'fill';
+    dlg.margins = [18, 16, 18, 14];
+    dlg.spacing = 12;
+
+    var metricsGroup = dlg.add('group');
+    metricsGroup.orientation = 'column';
+    metricsGroup.alignment = 'left';
+    metricsGroup.alignChildren = ['left', 'center'];
+    metricsGroup.spacing = 4;
+    metricsGroup.margins = 0;
+    var metricWidths = completionMetricWidths(info);
+    addCompletionMetricRow(metricsGroup, 'selectedObjects', info.selectedObjectCount, 'updatedColors', info.updatedColors, metricWidths);
+    addCompletionMetricRow(metricsGroup, 'cacheHitRate', info.cacheHitRate, 'processingTime', info.processingTime, metricWidths);
+
+    if (info.skippedCount > 0) {
+        var skippedTitle = formatMetricText('skippedCount', formatNumberWithUnit(info.skippedCount, 'skippedCountUnit'));
+        var breakdownLines = skippedBreakdownLines(info.skippedDetails);
+        var skippedPanelWidth = completionSkippedPanelWidth(skippedTitle, breakdownLines);
+        var skippedContentWidth = skippedPanelWidth - 20;
+        var skippedPanel = dlg.add('panel', undefined, '');
+        skippedPanel.alignment = 'fill';
+        skippedPanel.orientation = 'column';
+        skippedPanel.alignChildren = ['left', 'center'];
+        skippedPanel.preferredSize.width = skippedPanelWidth;
+        skippedPanel.margins = [10, 10, 10, 10];
+        skippedPanel.spacing = 6;
+
+        var skippedTitleText = skippedPanel.add('statictext', undefined, skippedTitle);
+        skippedTitleText.alignment = ['fill', 'center'];
+        skippedTitleText.justify = 'left';
+        skippedTitleText.preferredSize.width = skippedContentWidth;
+        setControlBold(skippedTitleText);
+
+        if (info.skippedMessage) {
+            addBoldMultilineText(skippedPanel, info.skippedMessage, skippedContentWidth);
+        }
+        if (breakdownLines.length > 0) {
+            addHorizontalRule(skippedPanel, skippedContentWidth);
+            addBoldMultilineText(skippedPanel, breakdownLines.join("\n"), skippedContentWidth);
+        } else {
+            skippedPanel.add('statictext', undefined, '');
+        }
+    }
+
+    var btnGroup = dlg.add('group');
+    btnGroup.alignment = 'right';
+    btnGroup.add('button', undefined, 'OK', { name: 'ok' });
+    dlg.show();
 }
 
 function cleanupAfterRun() {
@@ -2239,6 +2644,8 @@ function cleanupAfterRun() {
         processedGradientMap = {};
         cacheHitCount = 0;
         gSkipCount = 0;
+        gSkippedItems = [];
+        gSkipBreakdown = [];
         CMY_K_BALANCE_ENABLED = DEFAULT_CMY_K_BALANCE_ENABLED;
         CMY_K_BALANCE_VALUE = DEFAULT_CMY_K_BALANCE_VALUE;
         K_BOOST_ENABLED = DEFAULT_K_BOOST_ENABLED;
@@ -2261,7 +2668,8 @@ function cleanupAfterRun() {
 (
     function main() {
 
-        if (!validateActiveDocument()) return;
+        var doc = validateActiveDocument();
+        if (!doc) return;
 
         resetSkipCount();
 
@@ -2286,12 +2694,27 @@ function cleanupAfterRun() {
         // 選択オブジェクトへ適用（色の置換）
         var appliedInfo = null;
         var totalSec = 0;
-        var msg = null;
+        var completionInfo = null;
         var cancelled = false;
+        var finalSkippedItems = [];
         try {
             appliedInfo = applyToSelection(stats.items);
+            addUniqueItems(finalSkippedItems, stats.unsupportedItems);
+            addUniqueItems(finalSkippedItems, gSkippedItems);
             totalSec = (nowMs() - t0) / 1000.0; // 変換処理のみの時間
-            msg = buildResultMessage(stats.selectedObjectCount, stats.planned, appliedInfo, totalSec);
+            var skippedDetails = [];
+            addSkipBreakdownEntries(skippedDetails, stats.unsupportedBreakdown);
+            addSkipBreakdownEntries(skippedDetails, gSkipBreakdown);
+            var completionSelectedObjectCount = stats.selectedObjectCount + stats.unsupportedObjectCount;
+            completionInfo = {
+                selectedObjectCount: formatNumberWithUnit(completionSelectedObjectCount, 'selectedObjectsUnit'),
+                updatedColors: appliedInfo.count,
+                cacheHitRate: formatPercent(cacheHitCount, stats.planned),
+                processingTime: formatCompletionSeconds(totalSec),
+                skippedCount: stats.unsupportedObjectCount + gSkipCount,
+                skippedMessage: "",
+                skippedDetails: skippedDetails
+            };
         } catch (e) {
             if (isUserCancelledError(e)) {
                 cancelled = true;
@@ -2303,6 +2726,15 @@ function cleanupAfterRun() {
         }
         if (cancelled) return;
 
+        if (opt.selectSkippedObjects) {
+            var selectedSkippedCount = finalSkippedItems.length > 0 ? selectItems(doc, finalSkippedItems) : 0;
+            if (selectedSkippedCount === 0) {
+                clearSelection(doc);
+            } else {
+                completionInfo.skippedMessage = uiText('skippedObjectsSelected');
+            }
+        }
+
         // 実行結果をダイアログ表示
-        alert(msg.join("\n"));
+        showCompletionDialog(completionInfo);
     })();
