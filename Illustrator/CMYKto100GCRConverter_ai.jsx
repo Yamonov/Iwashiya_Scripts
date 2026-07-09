@@ -3,7 +3,7 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
-Version=2.2
+Version=2.2.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=色を変えずにCMYK値を調整
 Author=Murakami Yoshiteru
@@ -272,6 +272,7 @@ var UNSUPPORTED_OBJECT_TYPE_LABELS = {
     CompoundPathItem: { ja: "複合パス（内部取得不可）", en: "Compound path (contents unavailable)" }
 };
 var SKIP_REASON_LABELS = {
+    patternColor: { ja: "パターン等", en: "Patterns, etc." },
     nonCMYK: { ja: "非CMYKカラー", en: "Non-CMYK color" },
     noCandidate: { ja: "許容色差内の変換候補なし", en: "No candidate within allowed difference" },
     spotWriteFailed: { ja: "スポットカラー更新不可", en: "Spot color update failed" },
@@ -2134,6 +2135,7 @@ function processColorObject(color) {
     if (processedSpot) return processedSpot;
 
     if (isGrayColorObject(color)) return makeColorProcessResult(false, 'ignoredGray');
+    if (color && color.typename === 'PatternColor') return makeColorProcessResult(false, 'patternColor');
 
     var orig = extractCMYK(color);
     if (!orig) return makeColorProcessResult(false, 'nonCMYK'); // spot/RGB等
