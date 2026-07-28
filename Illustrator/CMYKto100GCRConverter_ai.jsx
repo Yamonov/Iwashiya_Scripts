@@ -3,11 +3,11 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
-Version=2.2.1
+Version=2.3
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=色を変えずにCMYK値を調整
 Author=Murakami Yoshiteru
-Release-Date=2026-07-09
+Release-Date=2026-07-28
 Target-App=Illustrator
 Edit-Password-SHA256=oS5aCLoTCKedGLZN:3d8282cb048f8c02d5bf1dca0493471b70fda75c2a3131e4cb0c10b4c1688127
 Description-BEGIN
@@ -36,16 +36,8 @@ function readSelfHeaderMeta() {
     f.close();
     s = s.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
     return {
-        version: (s.match(/^Version=([^\n]+)(?:\n|$)/m) || [])[1] || "",
-        releaseDate: (s.match(/^Release-Date=([^\n]+)(?:\n|$)/m) || [])[1] || ""
+        version: (s.match(/^Version=([^\n]+)(?:\n|$)/m) || [])[1] || ""
     };
-}
-
-function formatScriptVersion(meta) {
-    if (!meta.version && !meta.releaseDate) return "";
-    if (!meta.version) return "(" + meta.releaseDate + ")";
-    if (!meta.releaseDate) return "Ver " + meta.version;
-    return "Ver " + meta.version + " (" + meta.releaseDate + ")";
 }
 
 function formatScriptVersionOnly(meta) {
@@ -53,7 +45,6 @@ function formatScriptVersionOnly(meta) {
 }
 
 var YamoScriptMeta = readSelfHeaderMeta();
-var YamoScriptVersion = formatScriptVersion(YamoScriptMeta);
 var YamoScriptVersionOnly = formatScriptVersionOnly(YamoScriptMeta);
 //var YAMO_LOCALE_OVERRIDE = "en"; // テスト時のみ "ja" または "en" を指定
 
@@ -127,6 +118,10 @@ var UI_TEXT = {
     skippedObjectsSelected: {
         ja: "未適用オブジェクトを選択しました。分割・拡張が可能なオブジェクトは処理してから、再度実行してください。",
         en: "Unapplied objects were selected. For objects that can be divided or expanded, process them first and run the script again."
+    },
+    skippedObjectsPartiallySelected: {
+        ja: "未適用オブジェクト{total}件のうち{selected}件を選択しました。選択できなかったオブジェクトがあります。",
+        en: "Selected {selected} of {total} unapplied objects. Some objects could not be selected."
     },
     secondsUnit: { ja: "秒", en: "sec" },
     timeSeconds: { ja: "約{sec}秒", en: "about {sec} sec" },
@@ -231,23 +226,37 @@ var SATURATION_BOOST_PCT = DEFAULT_SATURATION_BOOST_PCT; // a*, b* をこの割�
 
 var CMYK_CHANNELS = ['c', 'm', 'y', 'k'];
 var DIRECT_PATTERN_INFO = {
-    K: { pattern: 'K', channelIds: [3], useC: false, useM: false, useY: false, removedCode: 0 },
-    CM: { pattern: 'CM', channelIds: [0, 1, 3], useC: true, useM: true, useY: false, removedCode: 3 },
-    MY: { pattern: 'MY', channelIds: [1, 2, 3], useC: false, useM: true, useY: true, removedCode: 1 },
-    YC: { pattern: 'YC', channelIds: [2, 0, 3], useC: true, useM: false, useY: true, removedCode: 2 }
+    K: { pattern: 'K', channelIds: [3], useC: false, useM: false, useY: false },
+    C: { pattern: 'C', channelIds: [0, 3], useC: true, useM: false, useY: false },
+    M: { pattern: 'M', channelIds: [1, 3], useC: false, useM: true, useY: false },
+    Y: { pattern: 'Y', channelIds: [2, 3], useC: false, useM: false, useY: true },
+    CM: { pattern: 'CM', channelIds: [0, 1, 3], useC: true, useM: true, useY: false },
+    MY: { pattern: 'MY', channelIds: [1, 2, 3], useC: false, useM: true, useY: true },
+    YC: { pattern: 'YC', channelIds: [2, 0, 3], useC: true, useM: false, useY: true }
 };
-var DIRECT_ACTIVE_PATTERN_INFOS = [
+var DIRECT_BASE_PATTERN_INFOS = [
     DIRECT_PATTERN_INFO.K,
     DIRECT_PATTERN_INFO.CM,
     DIRECT_PATTERN_INFO.MY,
     DIRECT_PATTERN_INFO.YC
 ];
+var DIRECT_SINGLE_PATTERN_INFOS = [
+    DIRECT_PATTERN_INFO.C,
+    DIRECT_PATTERN_INFO.M,
+    DIRECT_PATTERN_INFO.Y
+];
+var DIRECT_SINGLE_FALLBACK_DE_MIN = 0.35;
 var K_ONLY_SEED = { c: 0, m: 0, y: 0, k: 50 };
+var CMY_REFINE_MASKS = [
+    { c: true, m: true, y: false, k: false },
+    { c: false, m: true, y: true, k: false },
+    { c: true, m: false, y: true, k: false }
+];
+var K_REFINE_MASK = { c: false, m: false, y: false, k: true };
+var K_ONLY_REFINE_STEPS = [20, 10, 5, 2, 1];
 
 // 進行状況バー（ScriptUI）: 幅400px、分母は動的に+10%
 var gProgress = null;
-var gSkipCount = 0;
-var gSkippedItems = [];
 var gSkipBreakdown = [];
 var USER_CANCELLED_ERROR_NAME = "YamoUserCancelled";
 var SCAN_STATUS_CHECK_EVERY = 50;
@@ -277,6 +286,7 @@ var SKIP_REASON_LABELS = {
     noCandidate: { ja: "許容色差内の変換候補なし", en: "No candidate within allowed difference" },
     spotWriteFailed: { ja: "スポットカラー更新不可", en: "Spot color update failed" },
     colorReadFailed: { ja: "カラー取得不可", en: "Color read failed" },
+    colorWriteFailed: { ja: "カラー更新不可", en: "Color update failed" },
     textAttributesReadFailed: { ja: "テキスト属性取得不可", en: "Text attributes unavailable" },
     gradientStopFailed: { ja: "グラデーション停止色取得不可", en: "Gradient stop color failed" },
     fillStateReadFailed: { ja: "塗り情報取得不可", en: "Fill state unavailable" },
@@ -337,40 +347,38 @@ function addUnsupportedBreakdownEntry(entries, item) {
 }
 
 function resetSkipCount() {
-    gSkipCount = 0;
-    gSkippedItems = [];
     gSkipBreakdown = [];
 }
 
-function markSkippedItem(item) {
-    if (!item) return;
-    for (var i = 0, n = gSkippedItems.length; i < n; i++) {
-        if (gSkippedItems[i] === item) return;
-    }
-    gSkippedItems.push(item);
-}
-
-function countSkip(item, reason) {
-    gSkipCount++;
-    markSkippedItem(item);
+function countSkip(entry, reason) {
+    if (!entry || entry.skipped) return;
+    entry.skipped = true;
     reason = reason || "unknown";
     addSkipBreakdownEntry(gSkipBreakdown, "process:" + reason, skipReasonLabel(reason), 1);
 }
 
-function addUniqueItem(items, item) {
-    if (!item) return;
-    for (var i = 0, n = items.length; i < n; i++) {
-        if (items[i] === item) return;
-    }
-    items.push(item);
+function itemUUIDKey(item) {
+    try {
+        var uuid = item.uuid;
+        if (uuid || uuid === 0) return "uuid:" + String(uuid);
+    } catch (e) { }
+    return null;
 }
 
-function addUniqueItems(items, sourceItems) {
-    if (!sourceItems) return items;
-    for (var i = 0, n = sourceItems.length; i < n; i++) {
-        addUniqueItem(items, sourceItems[i]);
+function addUniqueSelectableItem(items, item, seenKeys, fallbackRefs) {
+    if (!item) return false;
+    var key = itemUUIDKey(item);
+    if (key) {
+        if (seenKeys[key]) return false;
+        seenKeys[key] = true;
+    } else {
+        for (var i = 0, n = fallbackRefs.length; i < n; i++) {
+            if (fallbackRefs[i] === item) return false;
+        }
+        fallbackRefs.push(item);
     }
-    return items;
+    items.push(item);
+    return true;
 }
 
 function clearSelection(doc) {
@@ -392,7 +400,7 @@ function selectItems(doc, items) {
     for (var i = 0, n = items ? items.length : 0; i < n; i++) {
         try {
             items[i].selected = true;
-            selected++;
+            if (items[i].selected) selected++;
         } catch (e2) { }
     }
     return selected;
@@ -463,7 +471,9 @@ function createProgressBar(initialMax) {
         value: 0,
         max: Math.max(1, initialMax | 0),
         updateEvery: PROGRESS_STATUS_CHECK_EVERY,
-        updateCount: 0
+        nextUpdate: PROGRESS_STATUS_CHECK_EVERY,
+        updateCount: 0,
+        checkpointCount: 0
     };
     return {
         step: function (n) {
@@ -475,17 +485,28 @@ function createProgressBar(initialMax) {
                 state.bar.maxvalue = state.max;
                 forceUpdate = true;
             }
-            var shouldUpdate = (forceUpdate || state.value >= state.max || (state.value % state.updateEvery) === 0);
+            var shouldUpdate = (forceUpdate || state.value >= state.max || state.value >= state.nextUpdate);
             if (shouldUpdate) {
+                while (state.nextUpdate <= state.value) state.nextUpdate += state.updateEvery;
                 state.bar.value = Math.min(state.value, state.max);
                 state.updateCount++;
                 var shouldCheckCancel = (state.updateCount % PROGRESS_CANCEL_CHECK_EVERY_UPDATES) === 0;
                 try {
                     state.win.update();
                 } catch (e) { }
+                if (cancelled) throw makeUserCancelledError();
                 if (shouldCheckCancel && isEscapePressed()) requestCancel();
-                if (shouldCheckCancel && cancelled) throw makeUserCancelledError();
+                if (cancelled) throw makeUserCancelledError();
             }
+        },
+        checkpoint: function () {
+            state.checkpointCount++;
+            if ((state.checkpointCount % state.updateEvery) !== 0) return;
+            try {
+                state.win.update();
+            } catch (e) { }
+            if (isEscapePressed()) requestCancel();
+            if (cancelled) throw makeUserCancelledError();
         },
         close: function () {
             try {
@@ -569,6 +590,10 @@ function createStatusWindow(message, width, helpText) {
 
 function stepProgress(n) {
     if (gProgress) gProgress.step(n || 1);
+}
+
+function checkpointProgress() {
+    if (gProgress) gProgress.checkpoint();
 }
 
 function setControlsEnabled(controls, enabled) {
@@ -973,6 +998,7 @@ function round2(x) {
 // === 入力CMYK→出力CMYK キャッシュ（丸めはキャッシュ専用） ===
 var resultCache = {};
 var cacheHitCount = 0;
+var resultCacheLookupCount = 0;
 
 function cacheKeyUnit(v) {
     var n = Math.round(v * CACHE_KEY_SCALE);
@@ -991,104 +1017,67 @@ function cacheKeyFromCMYK(c, m, y, k) {
         CACHE_KEY_BASE + kKey);
 }
 
-function cacheGetResult(cmyk) {
-    var key = cacheKeyFromCMYK(cmyk.c, cmyk.m, cmyk.y, cmyk.k);
-    return resultCache[key] || null;
+function cacheGetResult(cmyk, key) {
+    if (key == null) key = cacheKeyFromCMYK(cmyk.c, cmyk.m, cmyk.y, cmyk.k);
+    var cached = resultCache[key] || null;
+    if (!cached || !isSameCMYK(cached.input, cmyk)) return null;
+    return cached;
 }
 
-function cachePutResult(inCmyk, finalOut, changed) {
-    var key = cacheKeyFromCMYK(inCmyk.c, inCmyk.m, inCmyk.y, inCmyk.k);
+function cachePutResult(inCmyk, result, key) {
+    if (key == null) key = cacheKeyFromCMYK(inCmyk.c, inCmyk.m, inCmyk.y, inCmyk.k);
     resultCache[key] = {
-        changed: changed,
-        out: copyCMYK(finalOut)
+        input: copyCMYK(inCmyk),
+        changed: !!result.changed,
+        reason: result.reason || null,
+        out: result.out ? copyCMYK(result.out) : null
     };
 }
 
 // === CMYK→Lab メモ化（キャッシュ専用丸め） ===
 var labConvCache = {};
-var kOnlyLabConvCache = {};
+var kOnlyIntegerLabCache = new Array(101);
 var labConvCacheCount = 0;
 
 // === Spot（グローバルCMYK）の処理済み管理 ===
 var processedSpotMap = {};
 var processedGradientMap = {};
+var spotReferenceKeys = [];
+var gradientReferenceKeys = [];
 
-function spotKey(spot) {
-    // 優先: index が取れる場合はそれを使う
+function hostCollectionObjectKey(obj, prefix, references) {
+    if (!obj) return null;
     try {
-        if (spot.hasOwnProperty('index')) return 'idx:' + spot.index;
-    } catch (e) { }
-    // 次善: toString（[Spot Spot N] 等）
-    try {
-        var s = spot.toString();
-        if (s) return 'obj:' + s;
-    } catch (e) {
-        // 代替: 名前（自動リネーム対策として旧名も残す運用。後段で新名も登録する）
-        try {
-            if (spot.name) return 'name:' + spot.name;
-        } catch (e) { }
-    }
-    return 'spot:unknown';
-}
-
-function markProcessedSpot(sp, key) {
-    if (key) processedSpotMap[key] = true;
-    try {
-        var newKey = spotKey(sp);
-        if (newKey && newKey !== key) processedSpotMap[newKey] = true;
-    } catch (e) { }
-}
-
-function processedSpotResultFromColor(color) {
-    if (!color || color.typename !== 'SpotColor') return null;
-    try {
-        var sp = color.spot;
-        if (!sp) return null;
-        var key = spotKey(sp);
-        if (processedSpotMap[key]) {
-            return makeColorProcessResult(false, 'spotAlreadyProcessed');
+        var index = obj.index;
+        if ((typeof index === 'number' || typeof index === 'string') && (index || index === 0)) {
+            return prefix + ':idx:' + String(index);
         }
     } catch (e) { }
-    return null;
+    try {
+        var name = obj.name;
+        if (name) return prefix + ':name:' + String(name);
+    } catch (e2) { }
+    for (var i = 0, n = references.length; i < n; i++) {
+        if (references[i].ref === obj) return references[i].key;
+    }
+    var key = prefix + ':ref:' + references.length;
+    references.push({
+        ref: obj,
+        key: key
+    });
+    return key;
 }
 
-function isGrayColorObject(color) {
-    if (!color) return false;
-    if (color.typename === 'GrayColor') return true;
-    if (color.typename === 'SpotColor') {
-        try {
-            var sp = color.spot;
-            return !!(sp && sp.color && sp.color.typename === 'GrayColor');
-        } catch (e) { }
-    }
-    return false;
+function spotKey(spot) {
+    return hostCollectionObjectKey(spot, 'spot', spotReferenceKeys);
 }
 
 function gradientKey(gradient) {
-    try {
-        if (gradient.hasOwnProperty('index')) return 'idx:' + gradient.index;
-    } catch (e) { }
-    try {
-        if (gradient.name) return 'name:' + gradient.name;
-    } catch (e) { }
-    try {
-        var s = gradient.toString();
-        if (s) return 'obj:' + s;
-    } catch (e) { }
-    return null;
+    return hostCollectionObjectKey(gradient, 'gradient', gradientReferenceKeys);
 }
 
-function cmykLabCacheGet(c, m, y, k) {
-    var key = cacheKeyFromCMYK(c, m, y, k);
-    return labConvCache[key] || null;
-}
-
-function cmykLabCachePut(c, m, y, k, lab) {
-    var key = cacheKeyFromCMYK(c, m, y, k);
-    if (!labConvCache[key]) {
-        labConvCacheCount++;
-    }
-    labConvCache[key] = lab;
+function markProcessedSpot(key, state) {
+    if (key) processedSpotMap[key] = state;
 }
 
 function trimLabCacheAfterSearch() {
@@ -1102,30 +1091,33 @@ function isKOnlyCMYKValues(c, m, y) {
     return c === 0 && m === 0 && y === 0;
 }
 
-function kOnlyLabCacheGet(c, m, y, k) {
-    if (!isKOnlyCMYKValues(c, m, y)) return null;
-    return kOnlyLabConvCache[cacheKeyUnit(k)] || null;
+function integerKCacheIndex(k) {
+    var rounded = Math.round(k);
+    if (rounded < 0 || rounded > 100) return -1;
+    return Math.abs(k - rounded) < 1e-9 ? rounded : -1;
 }
 
-function kOnlyLabCachePut(c, m, y, k, lab) {
-    if (!isKOnlyCMYKValues(c, m, y)) return false;
-    kOnlyLabConvCache[cacheKeyUnit(k)] = lab;
-    return true;
-}
+function cmykToLab(c, m, y, k, knownKey) {
+    var isKOnly = isKOnlyCMYKValues(c, m, y);
+    var integerK = isKOnly ? integerKCacheIndex(k) : -1;
+    var key;
+    var cached;
 
-function cmykToLab(c, m, y, k) {
-    // キャッシュを先に確認
-    var kOnlyCached = kOnlyLabCacheGet(c, m, y, k);
-    if (kOnlyCached) {
-        return kOnlyCached;
+    if (integerK >= 0) {
+        cached = kOnlyIntegerLabCache[integerK];
+    } else {
+        key = knownKey == null ? cacheKeyFromCMYK(c, m, y, k) : knownKey;
+        cached = labConvCache[key];
+        if (cached &&
+            (cached.c !== c || cached.m !== m || cached.y !== y || cached.k !== k)) {
+            cached = null;
+        }
     }
-    var cached = cmykLabCacheGet(c, m, y, k);
-    if (cached) {
-        return cached;
-    }
+    if (cached) return integerK >= 0 ? cached : cached.lab;
+
     var lab = app.convertSampleColor(
         ImageColorSpace.CMYK,
-        [c, m, y, k],
+        [c, m, y, integerK >= 0 ? integerK : k],
         ImageColorSpace.LAB,
         ColorConvertPurpose.defaultpurpose
     );
@@ -1134,10 +1126,25 @@ function cmykToLab(c, m, y, k) {
         a: lab[1],
         b: lab[2]
     };
-    if (!kOnlyLabCachePut(c, m, y, k, out)) {
-        cmykLabCachePut(c, m, y, k, out);
+
+    if (integerK >= 0) {
+        kOnlyIntegerLabCache[integerK] = out;
+    } else {
+        if (!labConvCache[key]) labConvCacheCount++;
+        labConvCache[key] = {
+            c: c,
+            m: m,
+            y: y,
+            k: k,
+            lab: out
+        };
     }
     return out;
+}
+
+function getKOnlyIntegerLab(k) {
+    var lab = kOnlyIntegerLabCache[k];
+    return lab || cmykToLab(0, 0, 0, k);
 }
 
 // ΔE76: Lab間のユークリッド距離を計算（色差評価）
@@ -1179,14 +1186,21 @@ function copyCMYK(cmyk) {
     };
 }
 
-function makeLabResultFromCMYK(cmyk, targetLab) {
-    var lab = cmykToLab(cmyk.c, cmyk.m, cmyk.y, cmyk.k);
+function makeLabResultFromKnownLab(cmyk, targetLab, lab) {
     var out = copyCMYK(cmyk);
     out.L = lab.L;
     out.a = lab.a;
     out.b = lab.b;
     out.dE = de76(targetLab.L, targetLab.a, targetLab.b, lab.L, lab.a, lab.b);
     return out;
+}
+
+function makeLabResultFromCMYK(cmyk, targetLab) {
+    return makeLabResultFromKnownLab(
+        cmyk,
+        targetLab,
+        cmykToLab(cmyk.c, cmyk.m, cmyk.y, cmyk.k)
+    );
 }
 
 // CMYKColor オブジェクトを生成
@@ -1197,37 +1211,6 @@ function makeCMYK(c, m, y, k) {
     cc.yellow = y;
     cc.black = k;
     return cc;
-}
-
-// Illustrator Color から {c,m,y,k} を取得（CMYKColor/SpotColor(グローバルCMYK)対応）
-function extractCMYK(color) {
-    if (!color) return null;
-    // SpotColor（ベースがCMYKのグローバルプロセスのみ対象。真の特色や非CMYKは除外）
-    if (color.typename === 'SpotColor') {
-        try {
-            var sp = color.spot; // Spot オブジェクト
-            // 真の特色（ColorModel.SPOT）はスキップ。グローバルプロセス（ColorModel.PROCESS）のみ対象。
-            if (sp && sp.colorType === ColorModel.PROCESS && sp.color && sp.color.typename === 'CMYKColor') {
-                return {
-                    c: sp.color.cyan,
-                    m: sp.color.magenta,
-                    y: sp.color.yellow,
-                    k: sp.color.black,
-                    _isSpot: true,
-                    _spotRef: sp
-                };
-            }
-        } catch (e) { }
-        // SpotColor だが対象外（真の特色や非CMYKベース）は null
-        return null;
-    }
-    if (color.typename === 'CMYKColor') return {
-        c: color.cyan,
-        m: color.magenta,
-        y: color.yellow,
-        k: color.black
-    };
-    return null; // Spot/Gray/RGB/Pattern/Gradient は対象外（Gradientは別処理）
 }
 
 // CMYK値を整数に丸め
@@ -1288,9 +1271,10 @@ function _solveSymmetric(JTJ, b) {
     for (var i3 = 0; i3 < n; i3++) x[i3] = M[i3][n];
     return x;
 }
-function refineWithMaskLS(start, targetLab, allowed) {
+function refineWithMaskLS(start, targetLab, allowed, currentLab) {
     var cur = copyCMYK(start);
-    var lab = cmykToLab(cur.c, cur.m, cur.y, cur.k);
+    var baseCacheKey = cacheKeyFromCMYK(cur.c, cur.m, cur.y, cur.k);
+    var lab = currentLab || cmykToLab(cur.c, cur.m, cur.y, cur.k, baseCacheKey);
     // 有効チャネルを列順に並べる
     var cols = [];
     for (var i = 0; i < CMYK_CHANNELS.length; i++) {
@@ -1299,7 +1283,7 @@ function refineWithMaskLS(start, targetLab, allowed) {
     }
     var p = cols.length;
     if (p === 0) return makeLabResultFromCMYK(cur, targetLab);
-    // ヤコビアン J: 3 x p（前進差分）
+    // ヤコビアン J: 3 x p（上限では後退差分）
     var J = new Array(3);
     for (var r = 0; r < 3; r++) {
         J[r] = new Array(p);
@@ -1310,10 +1294,18 @@ function refineWithMaskLS(start, targetLab, allowed) {
         var h = LS_JACOBIAN_STEP;
         var trial = copyCMYK(cur);
         trial[ch] = clampPct(trial[ch] + h);
-        var lab2 = cmykToLab(trial.c, trial.m, trial.y, trial.k);
-        J[0][ci] = (lab2.L - lab.L) / h;
-        J[1][ci] = (lab2.a - lab.a) / h;
-        J[2][ci] = (lab2.b - lab.b) / h;
+        var actualDelta = trial[ch] - cur[ch];
+        var trialCacheKey = cacheKeyFromCMYK(trial.c, trial.m, trial.y, trial.k);
+        if (actualDelta === 0 || trialCacheKey === baseCacheKey) {
+            trial[ch] = clampPct(cur[ch] - h);
+            actualDelta = trial[ch] - cur[ch];
+            trialCacheKey = cacheKeyFromCMYK(trial.c, trial.m, trial.y, trial.k);
+        }
+        if (actualDelta === 0) continue;
+        var lab2 = cmykToLab(trial.c, trial.m, trial.y, trial.k, trialCacheKey);
+        J[0][ci] = (lab2.L - lab.L) / actualDelta;
+        J[1][ci] = (lab2.a - lab.a) / actualDelta;
+        J[2][ci] = (lab2.b - lab.b) / actualDelta;
     }
     // 正規方程式 A = J^T J + λI, b = J^T (target-lab)
     var A = new Array(p),
@@ -1347,23 +1339,6 @@ function isAlmostPureK(cmyk) {
     return cmyk.c <= ZERO_THR && cmyk.m <= ZERO_THR && cmyk.y <= ZERO_THR;
 }
 
-function makeCMYRefineMask(useC, useM, useY) {
-    return {
-        c: !!useC,
-        m: !!useM,
-        y: !!useY,
-        k: false
-    };
-}
-
-function cmyRefineMasks() {
-    return [
-        makeCMYRefineMask(true, true, false),
-        makeCMYRefineMask(false, true, true),
-        makeCMYRefineMask(true, false, true)
-    ];
-}
-
 function applyCMYMask(cmyk, mask) {
     var out = copyCMYK(cmyk);
     if (!mask.c) out.c = 0;
@@ -1373,10 +1348,9 @@ function applyCMYMask(cmyk, mask) {
 }
 
 function refineBestCMYPair(start, targetLab) {
-    var masks = cmyRefineMasks();
     var best = null;
-    for (var i = 0; i < masks.length; i++) {
-        var mask = masks[i];
+    for (var i = 0; i < CMY_REFINE_MASKS.length; i++) {
+        var mask = CMY_REFINE_MASKS[i];
         var maskedStart = applyCMYMask(start, mask);
         var candidate = refineWithMaskLSPasses(maskedStart, targetLab, mask, CMY_K_BALANCE_REFINE_PASSES);
         if (!best || candidate.dE < best.dE) {
@@ -1398,7 +1372,6 @@ function kIsReduced(base, candidate) {
 function findCMYBalanceResult(adj, targetLab, amount) {
     if (adj.k <= ZERO_THR) return adj;
 
-    var bestReduced = null;
     for (var i = 0; i < CMY_K_BALANCE_K_REDUCTION_FACTORS.length; i++) {
         var trialAmount = amount * CMY_K_BALANCE_K_REDUCTION_FACTORS[i];
         if (trialAmount <= 0) continue;
@@ -1410,22 +1383,10 @@ function findCMYBalanceResult(adj, targetLab, amount) {
         var candidate = finalizedLabResult(refineBestCMYPair(out, targetLab), targetLab);
         if (!kIsReduced(adj, candidate)) continue;
 
-        if (!bestReduced || candidate.k < bestReduced.k || (candidate.k === bestReduced.k && candidate.dE < bestReduced.dE)) {
-            bestReduced = candidate;
-        }
         if (acceptCMYKBalanceResult(adj, candidate, amount, targetLab)) return candidate;
     }
 
-    return bestReduced && acceptCMYKBalanceResult(adj, bestReduced, amount, targetLab) ? bestReduced : adj;
-}
-
-function buildKRefineMask() {
-    return {
-        c: false,
-        m: false,
-        y: false,
-        k: true
-    };
+    return adj;
 }
 
 function cmyKBalanceCurve(value) {
@@ -1440,7 +1401,7 @@ function cmyKBalanceCurve(value) {
 function refineWithMaskLSPasses(start, targetLab, allowed, passes) {
     var best = makeLabResultFromCMYK(start, targetLab);
     for (var i = 0; i < passes; i++) {
-        var next = refineWithMaskLS(best, targetLab, allowed);
+        var next = refineWithMaskLS(best, targetLab, allowed, best);
         if (!next || next.dE > best.dE + CMY_K_BALANCE_CHANGE_EPS) break;
         if (Math.abs(next.dE - best.dE) < CMY_K_BALANCE_CHANGE_EPS) {
             best = next;
@@ -1464,7 +1425,7 @@ function acceptCMYKBalanceResult(base, candidate, amount, targetLab) {
     if (!candidate) return false;
     if (candidate.dE <= base.dE) return true;
     var limit = (CMY_K_BALANCE_DE_BASE + (CMY_K_BALANCE_DE_RANGE * amount)) * cmyKBalanceToleranceMultiplier(targetLab);
-    return candidate.dE <= limit && (candidate.dE - base.dE) <= limit;
+    return candidate.dE <= limit;
 }
 
 function cmyTotal(cmyk) {
@@ -1516,7 +1477,7 @@ function applyCMYKBalance(adj, targetLab) {
         out.c = clampPct(out.c * cmyScale);
         out.m = clampPct(out.m * cmyScale);
         out.y = clampPct(out.y * cmyScale);
-        var kRes = refineWithMaskLSPasses(out, targetLab, buildKRefineMask(), CMY_K_BALANCE_REFINE_PASSES);
+        var kRes = refineWithMaskLSPasses(out, targetLab, K_REFINE_MASK, CMY_K_BALANCE_REFINE_PASSES);
         if (shouldProtectLightColorFromKBalance(adj, kRes, targetLab)) return adj;
         return acceptCMYKBalanceResult(adj, kRes, amount, targetLab) ? kRes : adj;
     } else {
@@ -1525,37 +1486,44 @@ function applyCMYKBalance(adj, targetLab) {
 }
 
 // -------- 直接探索: CMYのうち1色以上を0にしたパターンでLabへ近づける --------
-function refineKOnly(targetLab) {
-    var best = makeLabResultFromCMYK(K_ONLY_SEED, targetLab);
-    var steps = [20, 10, 5, 2, 1];
+function makeKOnlyResult(k, targetLab, scoreContext) {
+    k = Math.round(clampPct(k));
+    var cache = scoreContext ? scoreContext.kOnlyResultCache : null;
+    if (cache && cache.hasOwnProperty(k)) return cache[k];
+    var cmyk = {
+        c: 0,
+        m: 0,
+        y: 0,
+        k: k
+    };
+    var result = makeLabResultFromKnownLab(cmyk, targetLab, getKOnlyIntegerLab(k));
+    if (cache) cache[k] = result;
+    return result;
+}
 
-    for (var si = 0; si < steps.length; si++) {
-        var step = steps[si];
+function refineKOnly(targetLab, scoreContext) {
+    var best = makeKOnlyResult(K_ONLY_SEED.k, targetLab, scoreContext);
+
+    for (var si = 0; si < K_ONLY_REFINE_STEPS.length; si++) {
+        var step = K_ONLY_REFINE_STEPS[si];
         for (var pass = 0; pass < 12; pass++) {
             var improved = false;
-
-            var plus = {
-                c: 0,
-                m: 0,
-                y: 0,
-                k: clampPct(best.k + step)
-            };
-            if (plus.k !== best.k) {
-                var plusResult = makeLabResultFromCMYK(plus, targetLab);
+            var previousK = best.k;
+            var plusAdopted = false;
+            var plusK = Math.round(clampPct(best.k + step));
+            if (plusK !== best.k) {
+                var plusResult = makeKOnlyResult(plusK, targetLab, scoreContext);
                 if (plusResult.dE < best.dE) {
                     best = plusResult;
                     improved = true;
+                    plusAdopted = true;
                 }
             }
 
-            var minus = {
-                c: 0,
-                m: 0,
-                y: 0,
-                k: clampPct(best.k - step)
-            };
-            if (minus.k !== best.k) {
-                var minusResult = makeLabResultFromCMYK(minus, targetLab);
+            var minusK = Math.round(clampPct(best.k - step));
+            if (plusAdopted && minusK === previousK) continue;
+            if (minusK !== best.k) {
+                var minusResult = makeKOnlyResult(minusK, targetLab, scoreContext);
                 if (minusResult.dE < best.dE) {
                     best = minusResult;
                     improved = true;
@@ -1566,28 +1534,30 @@ function refineKOnly(targetLab) {
         }
     }
 
-    return makeLabResultFromCMYK(finalizeCMYK(best), targetLab);
+    return makeKOnlyResult(finalizeCMYK(best).k, targetLab, scoreContext);
 }
 
 function findKOnlyByLightness(targetLab) {
     var bestK = 0;
-    var bestScore = Math.abs(targetLab.L - cmykToLab(0, 0, 0, bestK).L);
+    var bestLab = getKOnlyIntegerLab(bestK);
+    var bestScore = Math.abs(targetLab.L - bestLab.L);
 
     for (var k = 1; k <= 100; k++) {
-        var lab = cmykToLab(0, 0, 0, k);
+        var lab = getKOnlyIntegerLab(k);
         var score = Math.abs(targetLab.L - lab.L);
         if (score < bestScore || (score === bestScore && k > bestK)) {
             bestK = k;
+            bestLab = lab;
             bestScore = score;
         }
     }
 
-    return makeLabResultFromCMYK({
+    return makeLabResultFromKnownLab({
         c: 0,
         m: 0,
         y: 0,
         k: bestK
-    }, targetLab);
+    }, targetLab, bestLab);
 }
 
 function buildKBoostResult(targetLab) {
@@ -1612,10 +1582,10 @@ function getDirectPatternInfo(pattern) {
     throw uiText('undefinedCMYKPattern') + pattern;
 }
 
-function makeDirectPatternSeed(inputCMYK, info) {
-    var removedMin = minRemovedCMY(inputCMYK, info);
+function makeDirectPatternSeed(inputCMYK, info, removedMin) {
+    if (removedMin == null) removedMin = minRemovedCMY(inputCMYK, info);
     var seedK = inputCMYK.k;
-    if (removedMin < 100) {
+    if (removedMin > 0) {
         seedK = clampPct(seedK + removedMin * 0.5);
     }
 
@@ -1630,11 +1600,11 @@ function makeDirectPatternSeed(inputCMYK, info) {
 function buildDirectPatternSeeds(inputCMYK, targetLab, info) {
     var seeds = [];
     var seen = {};
-    addUniqueDirectSeed(seeds, seen, makeDirectPatternSeed(inputCMYK, info));
+    var removedMin = minRemovedCMY(inputCMYK, info);
+    addUniqueDirectSeed(seeds, seen, makeDirectPatternSeed(inputCMYK, info, removedMin));
 
     if (!needsExtraDirectSeeds(targetLab)) return seeds;
 
-    var removedMin = minRemovedCMY(inputCMYK, info);
     var baseK = clampPct(inputCMYK.k);
     var approxKFromL = clampPct(100 - targetLab.L);
 
@@ -1676,10 +1646,11 @@ function makeScaledDirectPatternSeed(inputCMYK, info, cmyScale, kValue) {
 }
 
 function minRemovedCMY(inputCMYK, info) {
-    if (info.removedCode === 1) return inputCMYK.c;
-    if (info.removedCode === 2) return inputCMYK.m;
-    if (info.removedCode === 3) return inputCMYK.y;
-    return Math.min(inputCMYK.c, inputCMYK.m, inputCMYK.y);
+    var minimum = 101;
+    if (!info.useC && inputCMYK.c < minimum) minimum = inputCMYK.c;
+    if (!info.useM && inputCMYK.m < minimum) minimum = inputCMYK.m;
+    if (!info.useY && inputCMYK.y < minimum) minimum = inputCMYK.y;
+    return minimum === 101 ? 0 : minimum;
 }
 
 function makeDirectCandidateFromCMYK(cmyk, info) {
@@ -1704,7 +1675,9 @@ function makeDirectScoreContext(targetLab) {
     return {
         neutral: neutral,
         darkWeight: darkWeight,
-        kWeight: neutral * darkWeight
+        kWeight: neutral * darkWeight,
+        scoreCache: {},
+        kOnlyResultCache: {}
     };
 }
 
@@ -1714,7 +1687,9 @@ function scoreDirectCMYKValues(c, m, y, k, targetLab, scoreContext) {
     m = roundCMYKValue(m, true);
     y = roundCMYKValue(y, true);
     k = roundCMYKValue(k, true);
-    var lab = cmykToLab(c, m, y, k);
+    var key = cacheKeyFromCMYK(c, m, y, k);
+    if (ctx.scoreCache.hasOwnProperty(key)) return ctx.scoreCache[key];
+    var lab = cmykToLab(c, m, y, k, key);
     var dL = targetLab.L - lab.L;
     var da = targetLab.a - lab.a;
     var db = targetLab.b - lab.b;
@@ -1724,10 +1699,12 @@ function scoreDirectCMYKValues(c, m, y, k, targetLab, scoreContext) {
     var nonK = c + m + y;
     var underL = dL > 0 ? dL : 0;
 
-    return dE +
+    var score = dE +
         (DIRECT_GRAY_CAST_WEIGHT * ctx.neutral * grayCast) +
         (DIRECT_NONK_WEIGHT * ctx.kWeight * nonK / 100) +
         (DIRECT_UNDER_LIGHTNESS_WEIGHT * ctx.darkWeight * underL);
+    ctx.scoreCache[key] = score;
+    return score;
 }
 
 function directNeutralWeight(lab) {
@@ -1759,7 +1736,10 @@ function refineDirectCandidate(candidate, targetLab, passesPerStep, scoreContext
     var bestM = candidate.m;
     var bestY = candidate.y;
     var bestK = candidate.k;
-    var bestScore = scoreDirectCMYKValues(bestC, bestM, bestY, bestK, targetLab, scoreContext);
+    var bestScore = candidate.score;
+    if (bestScore == null) {
+        bestScore = scoreDirectCMYKValues(bestC, bestM, bestY, bestK, targetLab, scoreContext);
+    }
     var dirC = 1;
     var dirM = 1;
     var dirY = 1;
@@ -1878,7 +1858,10 @@ function refineIntegerDirectCandidate(candidate, targetLab, passes, scoreContext
     var bestM = roundCMYKValue(candidate.m, false);
     var bestY = roundCMYKValue(candidate.y, false);
     var bestK = roundCMYKValue(candidate.k, false);
-    var bestScore = scoreDirectCMYKValues(bestC, bestM, bestY, bestK, targetLab, scoreContext);
+    var bestScore = candidate.score;
+    if (bestScore == null) {
+        bestScore = scoreDirectCMYKValues(bestC, bestM, bestY, bestK, targetLab, scoreContext);
+    }
 
     for (var pass = 0; pass < passes; pass++) {
         var improved = false;
@@ -1895,6 +1878,7 @@ function refineIntegerDirectCandidate(candidate, targetLab, passes, scoreContext
                         bestC = next;
                         bestScore = nextScore;
                         improved = true;
+                        continue;
                     }
                 }
                 next = Math.round(clampPct(bestC - 1));
@@ -1914,6 +1898,7 @@ function refineIntegerDirectCandidate(candidate, targetLab, passes, scoreContext
                         bestM = next;
                         bestScore = nextScore;
                         improved = true;
+                        continue;
                     }
                 }
                 next = Math.round(clampPct(bestM - 1));
@@ -1933,6 +1918,7 @@ function refineIntegerDirectCandidate(candidate, targetLab, passes, scoreContext
                         bestY = next;
                         bestScore = nextScore;
                         improved = true;
+                        continue;
                     }
                 }
                 next = Math.round(clampPct(bestY - 1));
@@ -1952,6 +1938,7 @@ function refineIntegerDirectCandidate(candidate, targetLab, passes, scoreContext
                         bestK = next;
                         bestScore = nextScore;
                         improved = true;
+                        continue;
                     }
                 }
                 next = Math.round(clampPct(bestK - 1));
@@ -1971,45 +1958,111 @@ function refineIntegerDirectCandidate(candidate, targetLab, passes, scoreContext
     return makeDirectCandidateFromValues(bestC, bestM, bestY, bestK, info, bestScore);
 }
 
-function adjustDirectPatternedWithPasses(inputCMYK, targetLab, passesPerStep, integerPasses, scoreContext) {
-    var best = null;
-    for (var i = 0; i < DIRECT_ACTIVE_PATTERN_INFOS.length; i++) {
-        var info = DIRECT_ACTIVE_PATTERN_INFOS[i];
+function directPatternPriority(info) {
+    if (!info) return 99;
+    if (info.pattern === 'K') return 0;
+    if (info.pattern === 'C') return 1;
+    if (info.pattern === 'M') return 2;
+    if (info.pattern === 'Y') return 3;
+    if (info.pattern === 'CM') return 4;
+    if (info.pattern === 'MY') return 5;
+    if (info.pattern === 'YC') return 6;
+    return 99;
+}
+
+function isBetterDirectCandidate(candidate, best) {
+    if (!best) return true;
+    if (candidate.score < best.score) return true;
+    return candidate.score === best.score &&
+        directPatternPriority(candidate.patternInfo) < directPatternPriority(best.patternInfo);
+}
+
+function searchDirectPatternInfos(inputCMYK, targetLab, patternInfos, passesPerStep, scoreContext, initialBest) {
+    var best = initialBest || null;
+    for (var i = 0; i < patternInfos.length; i++) {
+        var info = patternInfos[i];
         if (info.pattern === 'K' && !isDirectKOnlyDecisionArea(targetLab)) continue;
         var seeds = buildDirectPatternSeeds(inputCMYK, targetLab, info);
         for (var si = 0; si < seeds.length; si++) {
             var candidate = makeDirectCandidateFromCMYK(seeds[si], info);
             var refined = refineDirectCandidate(candidate, targetLab, passesPerStep, scoreContext);
-            if (!best || refined.score < best.score) {
+            if (isBetterDirectCandidate(refined, best)) {
                 best = refined;
             }
         }
     }
-
-    if (!best) return null;
-
-    best = refineIntegerDirectCandidate(best, targetLab, integerPasses, scoreContext);
     return best;
+}
+
+function selectDirectSingleFallbackInfos(baseResult) {
+    if (!baseResult || baseResult.dE < DIRECT_SINGLE_FALLBACK_DE_MIN) return [];
+
+    var values = [
+        { value: baseResult.c, info: DIRECT_SINGLE_PATTERN_INFOS[0] },
+        { value: baseResult.m, info: DIRECT_SINGLE_PATTERN_INFOS[1] },
+        { value: baseResult.y, info: DIRECT_SINGLE_PATTERN_INFOS[2] }
+    ];
+    values.sort(function (a, b) {
+        if (a.value !== b.value) return b.value - a.value;
+        return directPatternPriority(a.info) - directPatternPriority(b.info);
+    });
+
+    var primary = values[0].value;
+    var secondaryTotal = values[1].value + values[2].value;
+    if (primary <= ZERO_THR || secondaryTotal > ZERO_THR * 2) return [];
+
+    var selected = [values[0].info];
+    if (values[1].value === primary) selected.push(values[1].info);
+    return selected;
+}
+
+function adjustDirectPatternedWithPasses(inputCMYK, targetLab, passesPerStep, integerPasses, scoreContext) {
+    var baseBest = searchDirectPatternInfos(
+        inputCMYK,
+        targetLab,
+        DIRECT_BASE_PATTERN_INFOS,
+        passesPerStep,
+        scoreContext,
+        null
+    );
+    if (!baseBest) return null;
+
+    var baseFinal = finalizeCMYK(baseBest);
+    var baseResult = makeLabResultFromCMYK(baseFinal, targetLab);
+    var singleInfos = selectDirectSingleFallbackInfos(baseResult);
+    var best = baseBest;
+
+    if (singleInfos.length > 0) {
+        best = searchDirectPatternInfos(
+            inputCMYK,
+            targetLab,
+            singleInfos,
+            passesPerStep,
+            scoreContext,
+            baseBest
+        );
+    }
+
+    var integerBest = refineIntegerDirectCandidate(best, targetLab, integerPasses, scoreContext);
+    var finalCMYK = finalizeCMYK(integerBest);
+    if (isSameCMYK(finalCMYK, baseFinal)) return baseResult;
+    return makeLabResultFromCMYK(finalCMYK, targetLab);
 }
 
 function adjustDirectPatterned(inputCMYK, targetLab) {
     var scoreContext = makeDirectScoreContext(targetLab);
-    var best = adjustDirectPatternedWithPasses(
+    var result = adjustDirectPatternedWithPasses(
         inputCMYK,
         targetLab,
         DIRECT_REFINE_PASSES_PER_STEP,
         DIRECT_INTEGER_REFINE_PASSES,
         scoreContext
     );
-    if (!best) return null;
-
-    var result = makeLabResultFromCMYK(finalizeCMYK(best), targetLab);
+    if (!result) return null;
 
     if (isDirectKOnlyDecisionArea(targetLab)) {
-        try {
-            var kOnly = refineKOnly(targetLab);
-            if (shouldPreferDirectKOnlyDark(targetLab, result, kOnly, scoreContext)) return kOnly;
-        } catch (e) { }
+        var kOnly = refineKOnly(targetLab, scoreContext);
+        if (shouldPreferDirectKOnlyDark(targetLab, result, kOnly, scoreContext)) return kOnly;
     }
 
     return result;
@@ -2045,324 +2098,542 @@ function isSameCMYK(a, b) {
     return a.c === b.c && a.m === b.m && a.y === b.y && a.k === b.k;
 }
 
-function getCachedAdjustedResult(orig) {
-    var cached = cacheGetResult(orig);
+function getCachedAdjustedResult(orig, key) {
+    var cached = cacheGetResult(orig, key);
     if (!cached) return null;
 
     cacheHitCount++;
-    if (!cached.changed) {
-        return makeColorProcessResult(false, 'same');
-    }
-    return makeColorProcessResult(true, null, copyCMYK(cached.out));
+    return makeColorProcessResult(cached.changed, cached.reason, cached.out);
 }
 
-function computeAdjustedResult(orig, useCache) {
-    var labA = cmykToLab(orig.c, orig.m, orig.y, orig.k);
-    var targetLab = (SATURATION_BOOST_ENABLED && SATURATION_BOOST_PCT > 0) ? applySaturationBoostToLab(labA, SATURATION_BOOST_PCT) : labA;
-    var kBoostResult = buildKBoostResult(targetLab);
+function cacheAdjustedResult(orig, result, key) {
+    cachePutResult(orig, result, key);
+    return result;
+}
 
-    if (kBoostResult) {
-        var kBoostOut = finalizeCMYK(kBoostResult);
-        if (!shouldProtectLightColorFromKBalance(orig, kBoostOut, targetLab)) {
-            var kBoostChanged = !isSameCMYK(orig, kBoostOut);
-            if (useCache) {
-                cachePutResult(orig, kBoostOut, kBoostChanged);
-            }
-            trimLabCacheAfterSearch();
+function computeAdjustedResult(orig, key) {
+    try {
+        var labA = cmykToLab(orig.c, orig.m, orig.y, orig.k, key);
+        var targetLab = (SATURATION_BOOST_ENABLED && SATURATION_BOOST_PCT > 0) ? applySaturationBoostToLab(labA, SATURATION_BOOST_PCT) : labA;
+        var kBoostResult = buildKBoostResult(targetLab);
 
-            if (!kBoostChanged) {
-                return makeColorProcessResult(false, 'same');
+        if (kBoostResult) {
+            var kBoostOut = finalizeCMYK(kBoostResult);
+            if (!shouldProtectLightColorFromKBalance(orig, kBoostOut, targetLab)) {
+                if (isSameCMYK(orig, kBoostOut)) {
+                    return cacheAdjustedResult(orig, makeColorProcessResult(false, 'same'), key);
+                }
+                return cacheAdjustedResult(orig, makeColorProcessResult(true, null, kBoostOut), key);
             }
-            return makeColorProcessResult(true, null, kBoostOut);
         }
-    }
 
-    var adj = adjustDirectPatterned(orig, targetLab);
-    if (!adj) {
+        var adj = adjustDirectPatterned(orig, targetLab);
+        if (!adj) {
+            return cacheAdjustedResult(orig, makeColorProcessResult(false, 'noCandidate'), key);
+        }
+
+        adj = applyCMYKBalance(adj, targetLab);
+
+        var finalOut = finalizeCMYK(adj);
+        if (isSameCMYK(orig, finalOut)) {
+            return cacheAdjustedResult(orig, makeColorProcessResult(false, 'same'), key);
+        }
+        return cacheAdjustedResult(orig, makeColorProcessResult(true, null, finalOut), key);
+    } finally {
         trimLabCacheAfterSearch();
-        return makeColorProcessResult(false, 'noCandidate');
     }
-
-    adj = applyCMYKBalance(adj, targetLab);
-
-    var finalOut = finalizeCMYK(adj);
-    var changed = !isSameCMYK(orig, finalOut);
-    if (useCache) {
-        cachePutResult(orig, finalOut, changed);
-    }
-    trimLabCacheAfterSearch();
-
-    if (!changed) {
-        return makeColorProcessResult(false, 'same');
-    }
-    return makeColorProcessResult(true, null, finalOut);
 }
 
-function buildAdjustedColorResult(orig, useCache) {
-    if (useCache) {
-        var cachedResult = getCachedAdjustedResult(orig);
-        if (cachedResult) return cachedResult;
-    }
-    return computeAdjustedResult(orig, useCache);
+function buildAdjustedColorResult(orig) {
+    resultCacheLookupCount++;
+    var key = cacheKeyFromCMYK(orig.c, orig.m, orig.y, orig.k);
+    var cachedResult = getCachedAdjustedResult(orig, key);
+    return cachedResult || computeAdjustedResult(orig, key);
 }
 
-function processSpotColorObject(orig) {
-    var sp = orig._spotRef;
-    var key = spotKey(sp);
-    if (processedSpotMap[key]) {
-        return makeColorProcessResult(false, 'spotAlreadyProcessed');
-    }
+function processedSpotStateResult(state) {
+    if (!state) return null;
+    return makeColorProcessResult(false, state.reason || 'spotAlreadyProcessed');
+}
 
-    var spotResult = buildAdjustedColorResult(orig, false);
+function processSpotColorObject(sp, key, orig) {
+    var spotResult = buildAdjustedColorResult(orig);
     if (!spotResult.changed) {
-        markProcessedSpot(sp, key);
+        var unchangedState = {
+            reason: spotResult.reason === 'same' ? null : spotResult.reason
+        };
+        markProcessedSpot(key, unchangedState);
         return spotResult;
     }
 
+    var convertedColor = makeCMYK(spotResult.out.c, spotResult.out.m, spotResult.out.y, spotResult.out.k);
     try {
-        sp.color = makeCMYK(spotResult.out.c, spotResult.out.m, spotResult.out.y, spotResult.out.k);
+        sp.color = convertedColor;
     } catch (e) {
-        return makeColorProcessResult(false, 'spotWriteFailed');
+        var failedState = {
+            reason: 'spotWriteFailed'
+        };
+        markProcessedSpot(key, failedState);
+        return makeColorProcessResult(false, failedState.reason);
     }
 
-    markProcessedSpot(sp, key);
+    markProcessedSpot(key, {
+        reason: null
+    });
     return makeColorProcessResult(true, null, spotResult.out, true);
 }
 
-// 単一カラー（CMYK/SpotColor）を処理 - 詳細な結果を返す
-function processColorObject(color) {
-    var processedSpot = processedSpotResultFromColor(color);
-    if (processedSpot) return processedSpot;
-
-    if (isGrayColorObject(color)) return makeColorProcessResult(false, 'ignoredGray');
-    if (color && color.typename === 'PatternColor') return makeColorProcessResult(false, 'patternColor');
-
-    var orig = extractCMYK(color);
-    if (!orig) return makeColorProcessResult(false, 'nonCMYK'); // spot/RGB等
-
-    // Spot（グローバルCMYK）の場合は、スウォッチ（Spot）のベース色を書き換える。オブジェクト側は触らない。
-    if (orig._isSpot && orig._spotRef) {
-        return processSpotColorObject(orig);
+function processSpotColor(color) {
+    var sp;
+    var key;
+    var baseColor;
+    var baseType;
+    var orig;
+    try {
+        sp = color.spot;
+        if (!sp) return makeColorProcessResult(false, 'nonCMYK');
+        key = spotKey(sp);
+        var priorState = key ? processedSpotMap[key] : null;
+        if (priorState) return processedSpotStateResult(priorState);
+        baseColor = sp.color;
+        baseType = baseColor ? String(baseColor.typename) : "";
+        if (baseType === 'GrayColor') {
+            markProcessedSpot(key, {
+                reason: null
+            });
+            return makeColorProcessResult(false, 'ignoredGray');
+        }
+        if (sp.colorType !== ColorModel.PROCESS || baseType !== 'CMYKColor') {
+            markProcessedSpot(key, {
+                reason: 'nonCMYK'
+            });
+            return makeColorProcessResult(false, 'nonCMYK');
+        }
+        orig = {
+            c: baseColor.cyan,
+            m: baseColor.magenta,
+            y: baseColor.yellow,
+            k: baseColor.black
+        };
+    } catch (e) {
+        if (sp && key) {
+            markProcessedSpot(key, {
+                reason: 'colorReadFailed'
+            });
+        }
+        return makeColorProcessResult(false, 'colorReadFailed');
     }
-
-    return buildAdjustedColorResult(orig, true);
+    return processSpotColorObject(sp, key, orig);
 }
 
-function applyColorResultToProperty(target, propName, res, ownerItem) {
+// 単一カラー（CMYK/SpotColor）を処理 - 詳細な結果を返す
+function processColorObject(color, typeName) {
+    if (!color) return makeColorProcessResult(false, 'same');
+    if (!typeName) {
+        try {
+            typeName = String(color.typename);
+        } catch (e) {
+            return makeColorProcessResult(false, 'colorReadFailed');
+        }
+    }
+
+    if (typeName === 'NoColor') return makeColorProcessResult(false, 'ignoredNoColor');
+    if (typeName === 'GrayColor') return makeColorProcessResult(false, 'ignoredGray');
+    if (typeName === 'PatternColor') return makeColorProcessResult(false, 'patternColor');
+    if (typeName === 'SpotColor') return processSpotColor(color);
+    if (typeName !== 'CMYKColor') return makeColorProcessResult(false, 'nonCMYK');
+
+    var orig;
+    try {
+        orig = {
+            c: color.cyan,
+            m: color.magenta,
+            y: color.yellow,
+            k: color.black
+        };
+    } catch (e2) {
+        return makeColorProcessResult(false, 'colorReadFailed');
+    }
+    return buildAdjustedColorResult(orig);
+}
+
+function isIgnoredColorProcessReason(reason) {
+    return !reason ||
+        reason === 'same' ||
+        reason === 'spotAlreadyProcessed' ||
+        reason === 'ignoredGray' ||
+        reason === 'ignoredNoColor';
+}
+
+function recordSharedFailure(sharedState, reason) {
+    if (sharedState && reason && !sharedState.reason) sharedState.reason = reason;
+}
+
+function applyColorResultToProperty(target, propName, res, entry, sharedState) {
     if (!res || !res.changed) {
-        if (res && res.reason && res.reason !== 'same' && res.reason !== 'spotAlreadyProcessed' && res.reason !== 'ignoredGray') {
-            countSkip(ownerItem || target, res.reason);
+        if (res && !isIgnoredColorProcessReason(res.reason)) {
+            countSkip(entry, res.reason);
+            recordSharedFailure(sharedState, res.reason);
         }
         return 0;
     }
-    if (!res.spot) {
-        target[propName] = makeCMYK(res.out.c, res.out.m, res.out.y, res.out.k);
+    if (res.spot) return 1;
+    var convertedColor = makeCMYK(res.out.c, res.out.m, res.out.y, res.out.k);
+    try {
+        target[propName] = convertedColor;
+    } catch (e) {
+        countSkip(entry, 'colorWriteFailed');
+        recordSharedFailure(sharedState, 'colorWriteFailed');
+        return 0;
     }
     return 1;
 }
 
-function processColorProperty(target, propName, allowGradient, ownerItem) {
+function processColorPropertyCore(target, propName, allowGradient, entry) {
+    var col;
+    var typeName;
     try {
-        var col = target[propName];
-        if (!col) return 0;
-        if (allowGradient && col.typename === 'GradientColor') {
-            var res = processGradientColor(col, ownerItem || target);
-            if (res.changed) target[propName] = col;
-            return res.changed;
-        }
-        var changed = applyColorResultToProperty(target, propName, processColorObject(col), ownerItem || target);
-        stepProgress(1);
-        return changed;
+        col = target[propName];
+        typeName = col ? String(col.typename) : "";
     } catch (e) {
-        if (isUserCancelledError(e)) throw e;
-        countSkip(ownerItem || target, 'colorReadFailed');
+        countSkip(entry, 'colorReadFailed');
         return 0;
     }
-}
-
-function getTextFrameAttributes(tf) {
-    try {
-        return tf.textRange.characterAttributes;
-    } catch (e) { }
-    return null;
-}
-
-function processTextAttributesColors(attrs, ownerItem) {
-    if (!attrs) return 0;
-    var changes = 0;
-    changes += processColorProperty(attrs, 'fillColor', false, ownerItem);
-    changes += processColorProperty(attrs, 'strokeColor', false, ownerItem);
-    return changes;
-}
-
-// TextFrame の文字カラー処理（塗り/線）: 実務で使用する統計を返す
-function processTextFrameColors(tf) {
-    var attrs = getTextFrameAttributes(tf);
-    if (!attrs) {
-        countSkip(tf, 'textAttributesReadFailed');
-        return {
-            changes: 0
-        };
+    if (!col) return 0;
+    if (allowGradient && typeName === 'GradientColor') {
+        return processGradientColor(col, entry).changed;
     }
-    return {
-        changes: processTextAttributesColors(attrs, tf)
-    };
+    return applyColorResultToProperty(target, propName, processColorObject(col, typeName), entry, null);
 }
 
 // GradientColor を処理（各ストップの CMYK/SpotColor） - カウンタ集計
-function processGradientColor(gradColor, ownerItem) {
-    var g = gradColor.gradient;
-    var key = gradientKey(g);
-    if (key && processedGradientMap[key]) {
+function processGradientColor(gradColor, entry) {
+    var g;
+    var key;
+    try {
+        g = gradColor.gradient;
+        key = gradientKey(g);
+    } catch (e) {
+        countSkip(entry, 'gradientStopFailed');
         return {
             changed: 0
         };
     }
-    var stops = g.gradientStops;
-    var changed = 0;
-    for (var i = 0, n = stops.length; i < n; i++) {
-        try {
-            var stop = stops[i];
-            var col = stop.color;
-            if (col) {
-                changed += applyColorResultToProperty(stop, 'color', processColorObject(col), ownerItem);
-            }
-        } catch (e) {
-            if (isUserCancelledError(e)) throw e;
-            countSkip(ownerItem, 'gradientStopFailed');
-        }
-        stepProgress(1);
+    var priorState = key ? processedGradientMap[key] : null;
+    if (priorState) {
+        if (priorState.reason) countSkip(entry, priorState.reason);
+        return {
+            changed: 0
+        };
     }
-    if (key) processedGradientMap[key] = true;
+
+    var sharedState = {
+        reason: null
+    };
+    var stops;
+    var stopCount;
+    try {
+        stops = g.gradientStops;
+        stopCount = stops.length;
+    } catch (e2) {
+        countSkip(entry, 'gradientStopFailed');
+        sharedState.reason = 'gradientStopFailed';
+        if (key) processedGradientMap[key] = sharedState;
+        return {
+            changed: 0
+        };
+    }
+
+    var changed = 0;
+    for (var i = 0; i < stopCount; i++) {
+        checkpointProgress();
+        var stop;
+        var col;
+        var typeName;
+        try {
+            stop = stops[i];
+            col = stop.color;
+            typeName = col ? String(col.typename) : "";
+        } catch (e3) {
+            countSkip(entry, 'gradientStopFailed');
+            recordSharedFailure(sharedState, 'gradientStopFailed');
+            continue;
+        }
+        if (col) {
+            changed += applyColorResultToProperty(
+                stop,
+                'color',
+                processColorObject(col, typeName),
+                entry,
+                sharedState
+            );
+        }
+    }
+    if (key) processedGradientMap[key] = sharedState;
     return {
         changed: changed
     };
 }
 
-// PageItem の塗り・線を処理 - 詳細カウンタを返す
-function processPageItemColors(item, filled, stroked) {
-    var changes = 0;
-    if (typeof filled === 'undefined') {
-        try {
-            filled = item.filled;
-        } catch (e) {
-            countSkip(item, 'fillStateReadFailed');
-            filled = false;
+function makeTextSubRange(tf, startIndex, endIndex) {
+    try {
+        var range = tf.textRange;
+        range.end = endIndex;
+        range.start = startIndex;
+        if (range.start !== startIndex || range.end !== endIndex) return null;
+        return range;
+    } catch (e) {
+        return null;
+    }
+}
+
+function readTextRunValue(tf, startIndex, endIndex) {
+    var probe = makeTextSubRange(tf, startIndex, endIndex);
+    if (!probe) return null;
+    try {
+        var value = Number(probe.getTextRunLength());
+        return isNaN(value) ? null : value;
+    } catch (e) {
+        return null;
+    }
+}
+
+function collectTextRunSpecs(tf, heartbeat) {
+    var fullRange;
+    var frameStart;
+    var frameEnd;
+    try {
+        fullRange = tf.textRange;
+        frameStart = Number(fullRange.start);
+        frameEnd = Number(fullRange.end);
+    } catch (e) {
+        return null;
+    }
+    if (isNaN(frameStart) || isNaN(frameEnd) || frameEnd < frameStart) return null;
+
+    var runValueMode = null;
+    if (frameEnd > frameStart) {
+        if (heartbeat) heartbeat();
+        var tailValue = readTextRunValue(tf, frameEnd - 1, frameEnd);
+        if (tailValue === frameEnd && frameEnd !== 1) {
+            runValueMode = 'absolute';
+        } else if (tailValue === 1) {
+            runValueMode = 'length';
         }
     }
-    if (typeof stroked === 'undefined') {
-        try {
-            stroked = item.stroked;
-        } catch (e2) {
-            countSkip(item, 'strokeStateReadFailed');
-            stroked = false;
+
+    var runs = [];
+    var cursor = frameStart;
+    while (cursor < frameEnd) {
+        if (heartbeat) heartbeat();
+        var runValue = readTextRunValue(tf, cursor, frameEnd);
+        if (runValue == null) return null;
+        var runEnd;
+        if (runValueMode === 'absolute') {
+            if (runValue <= cursor || runValue > frameEnd) return null;
+            runEnd = runValue;
+        } else if (runValueMode === 'length') {
+            if (runValue < 1 || cursor + runValue > frameEnd) return null;
+            runEnd = cursor + runValue;
+        } else {
+            var absoluteEnd = (runValue > cursor && runValue <= frameEnd) ? runValue : null;
+            var lengthEnd = (runValue >= 1 && cursor + runValue <= frameEnd) ? cursor + runValue : null;
+            if (absoluteEnd == null && lengthEnd == null) return null;
+            if (absoluteEnd == null) {
+                runValueMode = 'length';
+                runEnd = lengthEnd;
+            } else if (lengthEnd == null) {
+                runValueMode = 'absolute';
+                runEnd = absoluteEnd;
+            } else {
+                runEnd = absoluteEnd;
+            }
         }
+        runs.push({
+            start: cursor,
+            end: runEnd
+        });
+        cursor = runEnd;
     }
-    if (filled) changes += processColorProperty(item, 'fillColor', true, item);
-    if (stroked) changes += processColorProperty(item, 'strokeColor', true, item);
-    return {
-        changes: changes
-    };
+    return runs;
+}
+
+function addPathPaintTask(entry, target, stateProp, colorProp, errorReason) {
+    try {
+        if (target[stateProp]) {
+            entry.tasks.push({
+                kind: 'colorProperty',
+                propName: colorProp,
+                allowGradient: true,
+                steps: 1
+            });
+        }
+    } catch (e) {
+        entry.tasks.push({
+            kind: 'scanFailure',
+            reason: errorReason,
+            steps: 1
+        });
+    }
+}
+
+function addTextColorTasks(entry, tf, heartbeat) {
+    var runs = collectTextRunSpecs(tf, heartbeat);
+    if (!runs) {
+        entry.tasks.push({
+            kind: 'scanFailure',
+            reason: 'textAttributesReadFailed',
+            steps: 1
+        });
+        return;
+    }
+    for (var i = 0, n = runs.length; i < n; i++) {
+        entry.tasks.push({
+            kind: 'textRun',
+            start: runs[i].start,
+            end: runs[i].end,
+            steps: 2
+        });
+    }
 }
 
 function walkSelectionArtItems(visitor, unsupportedVisitor) {
-    var doc = app.activeDocument;
-    var sel = doc.selection;
-    if (!sel || sel.length === 0) return false;
+    var doc;
+    var sel;
+    var nSel;
+    try {
+        doc = app.activeDocument;
+        sel = doc.selection;
+        nSel = sel ? sel.length : 0;
+    } catch (e) {
+        throw e;
+    }
+    if (nSel === 0) return false;
 
     function walk(it) {
         if (!it) return;
-        var tn = it.typename;
+        var tn;
+        try {
+            tn = String(it.typename);
+        } catch (e) {
+            if (unsupportedVisitor) unsupportedVisitor(it);
+            return;
+        }
         if (tn === 'GroupItem') {
             var arr;
+            var n;
             try {
                 arr = it.pageItems;
-            } catch (e) {
-                if (isUserCancelledError(e)) throw e;
-                if (unsupportedVisitor) unsupportedVisitor(it);
-                return;
-            }
-            for (var i = 0, n = arr.length; i < n; i++) {
-                walk(arr[i]);
-            }
-        } else if (tn === 'CompoundPathItem') {
-            var arr2;
-            try {
-                arr2 = it.pathItems;
+                n = arr ? arr.length : 0;
             } catch (e2) {
                 if (isUserCancelledError(e2)) throw e2;
                 if (unsupportedVisitor) unsupportedVisitor(it);
                 return;
             }
-            for (var j = 0, n2 = arr2.length; j < n2; j++) {
-                walk(arr2[j]);
+            for (var i = 0; i < n; i++) {
+                var child;
+                try {
+                    child = arr[i];
+                } catch (e3) {
+                    if (isUserCancelledError(e3)) throw e3;
+                    if (unsupportedVisitor) unsupportedVisitor(it);
+                    return;
+                }
+                walk(child);
             }
+        } else if (tn === 'CompoundPathItem') {
+            var arr2;
+            var representative;
+            try {
+                arr2 = it.pathItems;
+                if (!arr2 || arr2.length === 0) {
+                    if (unsupportedVisitor) unsupportedVisitor(it);
+                    return;
+                }
+                representative = arr2[0];
+            } catch (e4) {
+                if (isUserCancelledError(e4)) throw e4;
+                if (unsupportedVisitor) unsupportedVisitor(it);
+                return;
+            }
+            visitor(representative, 'PathItem', it);
         } else if (tn === 'TextFrame' || tn === 'PathItem') {
-            visitor(it);
+            visitor(it, tn, it);
         } else if (unsupportedVisitor) {
             unsupportedVisitor(it);
         }
     }
-    for (var i = 0, nSel = sel.length; i < nSel; i++) walk(sel[i]);
+    for (var i = 0; i < nSel; i++) {
+        var root;
+        try {
+            root = sel[i];
+        } catch (e5) {
+            throw e5;
+        }
+        walk(root);
+    }
     return true;
 }
 
-function countTextFrameAttempts(tf) {
-    return 2;
-}
-
-function applySelectionArtItem(it) {
-    return (it.typename === 'TextFrame') ? processTextFrameColors(it).changes : processPageItemColors(it).changes;
-}
-
-function makeSelectionArtItemEntry(it) {
-    var tn = it.typename;
+function makeSelectionArtItemEntry(target, typeName, owner, heartbeat) {
     var entry = {
-        item: it,
-        typename: tn,
+        target: target,
+        owner: owner || target,
+        tasks: [],
         attempts: 0,
-        filled: false,
-        stroked: false
+        skipped: false
     };
-    if (tn === 'TextFrame') {
-        entry.attempts = countTextFrameAttempts(it);
-        return entry;
+    if (typeName === 'TextFrame') {
+        addTextColorTasks(entry, target, heartbeat);
+    } else {
+        addPathPaintTask(entry, target, 'filled', 'fillColor', 'fillStateReadFailed');
+        addPathPaintTask(entry, target, 'stroked', 'strokeColor', 'strokeStateReadFailed');
     }
-    try {
-        entry.filled = !!it.filled;
-        if (entry.filled) entry.attempts++;
-    } catch (e) { }
-    try {
-        entry.stroked = !!it.stroked;
-        if (entry.stroked) entry.attempts++;
-    } catch (e2) { }
+    for (var i = 0, n = entry.tasks.length; i < n; i++) {
+        entry.attempts += entry.tasks[i].steps || 1;
+    }
     return entry;
 }
 
+function applySelectionTask(entry, task) {
+    var changed = 0;
+    if (task.kind === 'scanFailure') {
+        countSkip(entry, task.reason);
+    } else if (task.kind === 'colorProperty') {
+        changed = processColorPropertyCore(entry.target, task.propName, task.allowGradient, entry);
+    } else if (task.kind === 'textRun') {
+        var range = makeTextSubRange(entry.target, task.start, task.end);
+        var attrs = null;
+        if (range) {
+            try {
+                attrs = range.characterAttributes;
+            } catch (e) { }
+        }
+        if (!attrs) {
+            countSkip(entry, 'textAttributesReadFailed');
+        } else {
+            changed += processColorPropertyCore(attrs, 'fillColor', false, entry);
+            changed += processColorPropertyCore(attrs, 'strokeColor', false, entry);
+        }
+    }
+    stepProgress(task.steps || 1);
+    return changed;
+}
+
 function applySelectionArtItemEntry(entry) {
-    if (!entry || !entry.item) return 0;
-    return (entry.typename === 'TextFrame') ?
-        processTextFrameColors(entry.item).changes :
-        processPageItemColors(entry.item, entry.filled, entry.stroked).changes;
+    if (!entry || !entry.target) return 0;
+    var changed = 0;
+    for (var i = 0, n = entry.tasks.length; i < n; i++) {
+        changed += applySelectionTask(entry, entry.tasks[i]);
+    }
+    return changed;
 }
 
 // 選択を走査して全適用（Group/Compound含む） - 詳細集計
 function applyToSelection(items) {
     var applied = 0;
-    if (items) {
-        for (var i = 0, n = items.length; i < n; i++) {
-            applied += applySelectionArtItemEntry(items[i]);
-        }
-        return {
-            count: applied
-        };
-    }
-    if (!walkSelectionArtItems(function (it) {
-        applied += applySelectionArtItem(it);
-    })) {
-        return {
-            count: 0
-        };
+    for (var i = 0, n = items ? items.length : 0; i < n; i++) {
+        applied += applySelectionArtItemEntry(items[i]);
     }
     return {
         count: applied
@@ -2400,9 +2671,12 @@ function collectSelectionStats(showStatusWindow) {
     var unsupportedBreakdown = [];
     var cancelled = false;
     var statusWindow = showStatusWindow ? createStatusWindow(uiText('scanningSelection'), 220, uiText('scanCancelHelp')) : null;
+    var scanHeartbeat = statusWindow ? function () {
+        statusWindow.tick();
+    } : null;
     try {
-        walkSelectionArtItems(function (it) {
-            var entry = makeSelectionArtItemEntry(it);
+        var walked = walkSelectionArtItems(function (target, typeName, owner) {
+            var entry = makeSelectionArtItemEntry(target, typeName, owner, scanHeartbeat);
             items.push(entry);
             selectedObjectCount++;
             planned += entry.attempts;
@@ -2413,14 +2687,16 @@ function collectSelectionStats(showStatusWindow) {
             addUnsupportedBreakdownEntry(unsupportedBreakdown, it);
             if (statusWindow) statusWindow.tick();
         });
+        if (!walked) throw new Error(uiText('requireSelection'));
     } catch (e) {
         if (isUserCancelledError(e)) {
             cancelled = true;
         } else {
             throw e;
         }
+    } finally {
+        if (statusWindow) statusWindow.close();
     }
-    if (statusWindow) statusWindow.close();
     return {
         cancelled: !!cancelled,
         planned: planned,
@@ -2430,6 +2706,25 @@ function collectSelectionStats(showStatusWindow) {
         unsupportedBreakdown: unsupportedBreakdown,
         items: items
     };
+}
+
+function collectFinalSkippedItems(stats) {
+    var items = [];
+    var seenKeys = {};
+    var fallbackRefs = [];
+    var unsupported = stats && stats.unsupportedItems ? stats.unsupportedItems : [];
+    var entries = stats && stats.items ? stats.items : [];
+    var i;
+
+    for (i = 0; i < unsupported.length; i++) {
+        addUniqueSelectableItem(items, unsupported[i], seenKeys, fallbackRefs);
+    }
+    for (i = 0; i < entries.length; i++) {
+        if (entries[i].skipped) {
+            addUniqueSelectableItem(items, entries[i].owner, seenKeys, fallbackRefs);
+        }
+    }
+    return items;
 }
 
 function formatPercent(numerator, denominator) {
@@ -2640,13 +2935,14 @@ function cleanupAfterRun() {
     try {
         resultCache = {};
         labConvCache = {};
-        kOnlyLabConvCache = {};
+        kOnlyIntegerLabCache = new Array(101);
         labConvCacheCount = 0;
         processedSpotMap = {};
         processedGradientMap = {};
+        spotReferenceKeys = [];
+        gradientReferenceKeys = [];
         cacheHitCount = 0;
-        gSkipCount = 0;
-        gSkippedItems = [];
+        resultCacheLookupCount = 0;
         gSkipBreakdown = [];
         CMY_K_BALANCE_ENABLED = DEFAULT_CMY_K_BALANCE_ENABLED;
         CMY_K_BALANCE_VALUE = DEFAULT_CMY_K_BALANCE_VALUE;
@@ -2701,8 +2997,7 @@ function cleanupAfterRun() {
         var finalSkippedItems = [];
         try {
             appliedInfo = applyToSelection(stats.items);
-            addUniqueItems(finalSkippedItems, stats.unsupportedItems);
-            addUniqueItems(finalSkippedItems, gSkippedItems);
+            finalSkippedItems = collectFinalSkippedItems(stats);
             totalSec = (nowMs() - t0) / 1000.0; // 変換処理のみの時間
             var skippedDetails = [];
             addSkipBreakdownEntries(skippedDetails, stats.unsupportedBreakdown);
@@ -2711,9 +3006,9 @@ function cleanupAfterRun() {
             completionInfo = {
                 selectedObjectCount: formatNumberWithUnit(completionSelectedObjectCount, 'selectedObjectsUnit'),
                 updatedColors: appliedInfo.count,
-                cacheHitRate: formatPercent(cacheHitCount, stats.planned),
+                cacheHitRate: formatPercent(cacheHitCount, resultCacheLookupCount),
                 processingTime: formatCompletionSeconds(totalSec),
-                skippedCount: stats.unsupportedObjectCount + gSkipCount,
+                skippedCount: finalSkippedItems.length,
                 skippedMessage: "",
                 skippedDetails: skippedDetails
             };
@@ -2732,6 +3027,11 @@ function cleanupAfterRun() {
             var selectedSkippedCount = finalSkippedItems.length > 0 ? selectItems(doc, finalSkippedItems) : 0;
             if (selectedSkippedCount === 0) {
                 clearSelection(doc);
+            } else if (selectedSkippedCount < finalSkippedItems.length) {
+                completionInfo.skippedMessage = uiFormat('skippedObjectsPartiallySelected', {
+                    selected: selectedSkippedCount,
+                    total: finalSkippedItems.length
+                });
             } else {
                 completionInfo.skippedMessage = uiText('skippedObjectsSelected');
             }
