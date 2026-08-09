@@ -3,18 +3,18 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.IllustratorCrop_RelinkFitter
-Version=0.7
+Version=1.0
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=Psの伸ばし情報で位置を変えずに再配置
 Author=Murakami Yoshiteru
-Release-Date=2026-05-13
+Release-Date=2026-08-10
 Target-App=Illustrator
 Edit-Password-SHA256=ZOv20mIwVP26NzJj:46c00dfa92b9392774dae9232e5b800346e33ba2dccaa2bdc8e7dfa99a7845bd
 Description-BEGIN
-Photoshop_Illustrator_Cropで処理した際に追加されるXMPタグを読み込み、Illustrator上のクリッピングマスク位置に合わせてリンク画像を再配置します。
+Photoshop側のIllustrator ResizeCropスクリプトで追加されるXMPタグを読み込み、Illustrator上のクリッピングマスク位置に合わせてリンク画像を再配置します。
 
 Photoshopでxmpタグを埋め込んでいない場合は動作しません。
-Photoshop_Illustrator_Crop.jsxとセットで運用してください。
+Photoshop側のIllustrator ResizeCropスクリプトとセットで運用してください。
 Description-END
 SCRIPTMETA-END
 */
@@ -52,8 +52,44 @@ SCRIPTMETA-END
             en: "Could not get the current placement information."
         },
         referenceGeometryUnavailable: {
-            ja: "クリッピングマスク、または現在の画像位置から基準座標を取得できませんでした。",
-            en: "Could not get reference coordinates from the clipping mask or current image position."
+            ja: "クリッピングマスクから基準座標を取得できませんでした。マスクが変更されていないか確認してください。",
+            en: "Could not get reference coordinates from the clipping mask. Check whether the mask has changed."
+        },
+        placementMismatch: {
+            ja: "このXMP配置情報は、選択した配置画像用ではありません。Photoshop側で対象配置を選び直して処理してください。",
+            en: "This XMP placement data belongs to a different placed item. Select the intended placement on the Photoshop side and process it again."
+        },
+        clippingMaskUnavailable: {
+            ja: "選択画像のクリッピングマスクを安全に取得できませんでした。",
+            en: "The clipping mask for the selected image could not be obtained safely."
+        },
+        noClippingMask: {
+            ja: "選択画像がクリッピングマスク内にありません。",
+            en: "The selected image is not inside a clipping mask."
+        },
+        nestedClippingMasks: {
+            ja: "多重クリッピングマスクは安全に処理できません。",
+            en: "Nested clipping masks cannot be processed safely."
+        },
+        multipleClippingPaths: {
+            ja: "独立したクリッピングパスが複数あります。",
+            en: "Multiple independent clipping paths were found."
+        },
+        clippingPathUnavailable: {
+            ja: "クリッピングパスを確認できません。",
+            en: "The clipping path could not be verified."
+        },
+        openClippingPath: {
+            ja: "開いたクリッピングパスは安全に処理できません。",
+            en: "An open clipping path cannot be processed safely."
+        },
+        previewFailed: {
+            ja: "配置プレビューを適用できませんでした。OKは実行できません。",
+            en: "The placement preview could not be applied. The operation cannot be confirmed."
+        },
+        restoreFailed: {
+            ja: "元の配置へ完全に戻せませんでした。取り消してからリンクと変形を確認してください。",
+            en: "The original placement could not be fully restored. Undo, then check the link and transform."
         },
         dialogTitle: {
             ja: "XMP配置で再配置",
@@ -108,8 +144,8 @@ SCRIPTMETA-END
             en: "Failed to read XMP placement data.\nAfter processing on the Photoshop side, save the image and run this script again."
         },
         unsupportedXmpVersion: {
-            ja: "対応していない XMP 配置情報です。Photoshop側の Crop スクリプトと Fitter のバージョンを確認してください。",
-            en: "Unsupported XMP placement data. Check the versions of the Photoshop-side Crop script and Fitter."
+            ja: "対応していない XMP 配置情報です。Photoshop側の ResizeCrop スクリプトと Fitter のバージョンを確認してください。",
+            en: "Unsupported XMP placement data. Check the versions of the Photoshop-side ResizeCrop script and Fitter."
         },
         unsupportedXmpUnit: {
             ja: "対応していない XMP 配置情報の単位です。Photoshop側で処理し直してください。",
@@ -149,6 +185,8 @@ SCRIPTMETA-END
     var SOURCE_APP = "Illustrator";
     var SOURCE_KIND = "IllustratorClippingMask";
     var COORDINATE_SPACE = "image-local";
+    var GEOMETRY_EPSILON = 0.000000000001;
+    var MASK_BOUNDS_TOLERANCE_PT = 0.05;
 
     if (app.documents.length === 0) {
         alert(uiText("noDocument"));
@@ -259,7 +297,7 @@ SCRIPTMETA-END
         var replacementData;
         var replacementValidationMessage;
         var originalSnapshot;
-        var maskItem;
+        var maskDescriptor;
         var referenceGeometry;
 
         if (linkStatusMessage) {
@@ -285,6 +323,12 @@ SCRIPTMETA-END
                 message: replacementValidationMessage
             };
         }
+        if (!replacementDataMatchesItem(item, replacementData)) {
+            return {
+                target: null,
+                message: uiText("placementMismatch")
+            };
+        }
 
         originalSnapshot = getCurrentPlacementSnapshot(item);
         if (!originalSnapshot) {
@@ -294,8 +338,16 @@ SCRIPTMETA-END
             };
         }
 
-        maskItem = findClippingMaskForPlacedItem(item);
-        referenceGeometry = buildReferenceGeometry(item, maskItem, replacementData, originalSnapshot);
+        maskDescriptor = findClippingMaskForPlacedItem(item);
+        if (!maskDescriptor || maskDescriptor.status !== "ok") {
+            return {
+                target: null,
+                message: maskDescriptor && maskDescriptor.reason
+                    ? maskDescriptor.reason
+                    : uiText("clippingMaskUnavailable")
+            };
+        }
+        referenceGeometry = buildReferenceGeometry(maskDescriptor, replacementData, originalSnapshot);
         if (!referenceGeometry) {
             return {
                 target: null,
@@ -306,7 +358,7 @@ SCRIPTMETA-END
         return {
             target: {
                 item: item,
-                maskItem: maskItem,
+                maskDescriptor: maskDescriptor,
                 originalTransformSnapshot: originalSnapshot,
                 replacementData: replacementData,
                 referenceGeometry: referenceGeometry
@@ -319,9 +371,13 @@ SCRIPTMETA-END
         var dialog = new Window("dialog", uiText("dialogTitle"));
         var mode1Button;
         var mode2Button;
+        var okButton;
+        var statusText;
         var selectedMode = resolveInitialMode(target);
         var mode1Text = buildModeOptionText(target, MODE_1, uiText("mode1Base"));
         var mode2Text = buildModeOptionText(target, MODE_2, uiText("mode2Base"));
+        var previewSucceeded = false;
+        var accepted = false;
 
         dialog.orientation = "column";
         dialog.alignChildren = ["fill", "top"];
@@ -341,13 +397,15 @@ SCRIPTMETA-END
 
         var buttonGroup = dialog.add("group");
         buttonGroup.alignment = ["right", "center"];
-        buttonGroup.add("button", undefined, "OK", { name: "ok" });
+        okButton = buttonGroup.add("button", undefined, "OK", { name: "ok" });
         buttonGroup.add("button", undefined, uiText("cancelButton"), { name: "cancel" });
+        statusText = dialog.add("statictext", undefined, " ");
 
         function updatePreview(mode) {
             selectedMode = mode;
-            restoreOriginalPlacement(target);
-            applyReplacementMode(target, mode);
+            previewSucceeded = applyPreviewModeSafely(target, mode);
+            okButton.enabled = previewSucceeded;
+            statusText.text = previewSucceeded ? " " : uiText("previewFailed");
             try {
                 app.redraw();
             } catch (e) {}
@@ -364,14 +422,32 @@ SCRIPTMETA-END
         dialog.onShow = function () {
             updatePreview(selectedMode);
         };
+        okButton.onClick = function () {
+            if (previewSucceeded) dialog.close(1);
+        };
 
-        var result = dialog.show();
-        if (result !== 1) {
-            restoreOriginalPlacement(target);
-            try {
-                app.redraw();
-            } catch (e2) {}
+        try {
+            accepted = dialog.show() === 1 && previewSucceeded;
+        } catch (dialogError) {
+            accepted = false;
+            alert(dialogError);
+        } finally {
+            if (!accepted && !restoreOriginalPlacement(target)) {
+                alert(uiText("restoreFailed"));
+            }
+            if (!accepted) {
+                try {
+                    app.redraw();
+                } catch (e2) {}
+            }
         }
+    }
+
+    function applyPreviewModeSafely(target, mode) {
+        if (!restoreOriginalPlacement(target)) return false;
+        if (applyReplacementMode(target, mode)) return true;
+        if (!restoreOriginalPlacement(target)) alert(uiText("restoreFailed"));
+        return false;
     }
 
     function resolveInitialMode(target) {
@@ -453,8 +529,7 @@ SCRIPTMETA-END
         return {
             topLeft: targetTopLeft,
             width: mmToPt(source.w),
-            height: mmToPt(source.h),
-            rotation: reference.rotation
+            height: mmToPt(source.h)
         };
     }
 
@@ -463,45 +538,16 @@ SCRIPTMETA-END
     }
 
     function applyPlacement(item, placement, reference) {
-        var baseSize;
+        var placementMatrix;
         var currentTopLeft;
-        var scaleX;
-        var scaleY;
 
         if (!placement || placement.width <= 0 || placement.height <= 0) {
             return false;
         }
 
-        if (!resetItemToBase(item, reference)) {
-            return false;
-        }
-
-        baseSize = getCurrentItemSize(item);
-        if (!baseSize || baseSize.width <= 0 || baseSize.height <= 0) {
-            return false;
-        }
-
-        scaleX = placement.width / baseSize.width * 100;
-        scaleY = placement.height / baseSize.height * 100;
-
-        try {
-            item.resize(
-                scaleX,
-                scaleY,
-                true,
-                true,
-                true,
-                true,
-                100,
-                Transformation.TOPLEFT
-            );
-        } catch (resizeError) {
-            return false;
-        }
-
-        if (!rotateItemToReference(item, placement.rotation, reference)) {
-            return false;
-        }
+        placementMatrix = buildPlacementMatrix(item, placement, reference);
+        if (!placementMatrix) return false;
+        try { item.matrix = placementMatrix; } catch (matrixError) { return false; }
 
         currentTopLeft = getCurrentItemTopLeft(item);
         if (!currentTopLeft) {
@@ -515,98 +561,35 @@ SCRIPTMETA-END
         );
     }
 
-    function resetItemToBase(item, reference) {
-        try {
-            item.matrix = buildResetMatrix(reference);
-            return true;
-        } catch (matrixError) {}
-
-        return false;
-    }
-
-    function buildResetMatrix(reference) {
-        var matrix = app.getIdentityMatrix();
-        if (reference && isFiniteNumber(reference.determinant) && reference.determinant < 0) {
-            matrix.mValueD = -1;
+    function buildPlacementMatrix(item, placement, reference) {
+        var sourceSize = getPlacedItemSourceSize(item);
+        if (!sourceSize || !reference || !reference.axisX || !reference.axisY ||
+                placement.width <= 0 || placement.height <= 0) {
+            return null;
         }
+        var matrix = app.getIdentityMatrix();
+        matrix.mValueA = reference.axisX[0] * placement.width / sourceSize.width;
+        matrix.mValueB = -reference.axisX[1] * placement.width / sourceSize.width;
+        matrix.mValueC = -reference.axisY[0] * placement.height / sourceSize.height;
+        matrix.mValueD = reference.axisY[1] * placement.height / sourceSize.height;
         return matrix;
     }
 
-    function rotateItemToReference(item, rotation, reference) {
-        var firstScore;
-        var secondScore;
-
-        if (Math.abs(rotation) < 0.0001) {
-            return true;
-        }
-
-        try {
-            item.rotate(rotation, true, true, true, true, Transformation.TOPLEFT);
-        } catch (rotateError) {
-            return false;
-        }
-
-        firstScore = getAxisAlignmentScore(item, reference);
-        if (firstScore >= 1.998) {
-            return true;
-        }
-
-        try {
-            item.rotate(-2 * rotation, true, true, true, true, Transformation.TOPLEFT);
-        } catch (reverseError) {
-            return true;
-        }
-
-        secondScore = getAxisAlignmentScore(item, reference);
-        if (secondScore > firstScore) {
-            return true;
-        }
-
-        try {
-            item.rotate(2 * rotation, true, true, true, true, Transformation.TOPLEFT);
-        } catch (restoreRotateError) {}
-
-        return true;
-    }
-
-    function getAxisAlignmentScore(item, reference) {
-        var axes = getAxesFromItem(item);
-        if (!axes || !reference || !reference.axisX || !reference.axisY) {
-            return 2;
-        }
-        return dotProduct(axes.axisX, reference.axisX) + dotProduct(axes.axisY, reference.axisY);
-    }
-
-    function buildReferenceGeometry(item, maskItem, replacementData, snapshot) {
+    function buildReferenceGeometry(maskDescriptor, replacementData, snapshot) {
         var axes = getAxesFromMatrix(snapshot.transformMatrix);
-        var topLeft = null;
         var baseSize = getReplacementImageSize(replacementData);
-
-        if (!axes) {
-            axes = getAxesFromItem(item);
-        }
-        if (!axes || !baseSize) {
-            return null;
-        }
-
-        if (maskItem && isValidMaskLocalBounds(replacementData.maskLocalBounds)) {
-            topLeft = buildReferenceTopLeftFromMask(maskItem, axes, replacementData.maskLocalBounds);
-        }
-
-        if (!topLeft) {
-            topLeft = buildReferenceTopLeftFromCenter(snapshot.center, axes, baseSize);
-        }
-
-        if (!topLeft) {
-            return null;
-        }
+        if (!axes || !baseSize || !isValidMaskLocalBounds(replacementData.maskLocalBounds)) return null;
+        var topLeft = buildReferenceTopLeftFromMask(
+            maskDescriptor,
+            axes,
+            replacementData.maskLocalBounds
+        );
+        if (!topLeft) return null;
 
         return {
             topLeft: topLeft,
             axisX: axes.axisX,
             axisY: axes.axisY,
-            rotation: axes.rotation,
-            determinant: axes.determinant,
             baseSize: baseSize
         };
     }
@@ -615,7 +598,8 @@ SCRIPTMETA-END
         if (!replacementData || !replacementData.imageSize) {
             return null;
         }
-        if (!isFiniteNumber(replacementData.imageSize.w) || !isFiniteNumber(replacementData.imageSize.h)) {
+        if (!isFiniteNumber(replacementData.imageSize.w) || !isFiniteNumber(replacementData.imageSize.h) ||
+                Number(replacementData.imageSize.w) <= 0 || Number(replacementData.imageSize.h) <= 0) {
             return null;
         }
         return {
@@ -624,54 +608,32 @@ SCRIPTMETA-END
         };
     }
 
-    function buildReferenceTopLeftFromMask(maskItem, axes, maskLocalBounds) {
-        var points = getMaskDocumentPoints(maskItem);
-        var minProjectedX = null;
-        var minProjectedY = null;
+    function buildReferenceTopLeftFromMask(maskDescriptor, axes, maskLocalBounds) {
+        var segments = getMaskBezierSegments(maskDescriptor);
+        var projectedBounds = getBezierBounds(segments, axes);
         var localLeft = mmToPt(maskLocalBounds.left);
         var localTop = mmToPt(maskLocalBounds.top);
-        var projectedX;
-        var projectedY;
-        var originDotX;
-        var originDotY;
-
-        if (!points || points.length === 0) {
-            return null;
-        }
-
-        for (var i = 0; i < points.length; i++) {
-            projectedX = dotProduct(points[i], axes.axisX);
-            projectedY = dotProduct(points[i], axes.axisY);
-            if (minProjectedX === null || projectedX < minProjectedX) {
-                minProjectedX = projectedX;
-            }
-            if (minProjectedY === null || projectedY < minProjectedY) {
-                minProjectedY = projectedY;
-            }
-        }
-
-        if (minProjectedX === null || minProjectedY === null) {
-            return null;
-        }
-
-        originDotX = minProjectedX - localLeft;
-        originDotY = minProjectedY - localTop;
+        var localRight = mmToPt(maskLocalBounds.right);
+        var localBottom = mmToPt(maskLocalBounds.bottom);
+        if (!projectedBounds || !boundsDimensionsMatch(
+                projectedBounds,
+                localRight - localLeft,
+                localBottom - localTop
+        )) return null;
+        var originCoordinateX = projectedBounds.minX - localLeft;
+        var originCoordinateY = projectedBounds.minY - localTop;
 
         return addPoints(
-            scalePoint(axes.axisX, originDotX),
-            scalePoint(axes.axisY, originDotY)
+            scalePoint(axes.axisX, originCoordinateX),
+            scalePoint(axes.axisY, originCoordinateY)
         );
     }
 
-    function buildReferenceTopLeftFromCenter(center, axes, baseSize) {
-        if (!center || !axes || !baseSize) {
-            return null;
-        }
-
-        return subtractPoints(
-            subtractPoints(center, scalePoint(axes.axisX, baseSize.width / 2)),
-            scalePoint(axes.axisY, baseSize.height / 2)
-        );
+    function boundsDimensionsMatch(bounds, expectedWidth, expectedHeight) {
+        var width = bounds.maxX - bounds.minX;
+        var height = bounds.maxY - bounds.minY;
+        return Math.abs(width - expectedWidth) <= MASK_BOUNDS_TOLERANCE_PT + Math.max(width, expectedWidth) * 0.000001 &&
+            Math.abs(height - expectedHeight) <= MASK_BOUNDS_TOLERANCE_PT + Math.max(height, expectedHeight) * 0.000001;
     }
 
     function localPointToDocumentPoint(localX, localY, reference) {
@@ -787,6 +749,9 @@ SCRIPTMETA-END
         if (!isValidReplacementMode(replacementData.mode1) || !isValidReplacementMode(replacementData.mode2)) {
             return uiText("xmpDataInvalid");
         }
+        if (!isValidMaskLocalBounds(replacementData.maskLocalBounds)) {
+            return uiText("xmpDataInvalid");
+        }
         if (!getReplacementImageSize(replacementData)) {
             return uiText("missingOriginalImageSize");
         }
@@ -808,7 +773,14 @@ SCRIPTMETA-END
             isFiniteNumber(bounds.left) &&
             isFiniteNumber(bounds.top) &&
             isFiniteNumber(bounds.right) &&
-            isFiniteNumber(bounds.bottom);
+            isFiniteNumber(bounds.bottom) &&
+            Number(bounds.right) > Number(bounds.left) &&
+            Number(bounds.bottom) > Number(bounds.top);
+    }
+
+    function replacementDataMatchesItem(item, replacementData) {
+        var expectedUuid = String(replacementData && replacementData.placedItemUuid || "");
+        return !expectedUuid || expectedUuid === getItemUuid(item);
     }
 
     function isFiniteNumber(value) {
@@ -818,16 +790,14 @@ SCRIPTMETA-END
     function getCurrentPlacementSnapshot(item) {
         var matrix = readItemTransformMatrix(item);
         var topLeft = getCurrentItemTopLeft(item);
-        var center = getItemBoundsCenter(item);
 
-        if (!matrix || !topLeft || !center) {
+        if (!matrix || !topLeft) {
             return null;
         }
 
         return {
             transformMatrix: matrix,
-            topLeft: topLeft,
-            center: center
+            topLeft: topLeft
         };
     }
 
@@ -871,15 +841,12 @@ SCRIPTMETA-END
         }
 
         currentTopLeft = getCurrentItemTopLeft(item);
-        if (currentTopLeft && snapshot.topLeft) {
-            translateItem(
-                item,
-                snapshot.topLeft[0] - currentTopLeft[0],
-                snapshot.topLeft[1] - currentTopLeft[1]
-            );
-        }
-
-        return true;
+        if (!currentTopLeft || !snapshot.topLeft) return false;
+        return translateItem(
+            item,
+            snapshot.topLeft[0] - currentTopLeft[0],
+            snapshot.topLeft[1] - currentTopLeft[1]
+        );
     }
 
     function getPlacedItemLinkStatusMessage(item) {
@@ -956,24 +923,26 @@ SCRIPTMETA-END
     function collectSelectedPlacedItems(selection) {
         var results = [];
         var seen = {};
+        var visited = {};
 
         for (var i = 0; i < selection.length; i++) {
-            collectPlacedItemsFromItem(selection[i], results, seen, 0);
+            collectPlacedItemsFromItem(selection[i], results, seen, visited, 0);
         }
 
         return results;
     }
 
-    function collectPlacedItemsFromItem(item, results, seen, depth) {
+    function collectPlacedItemsFromItem(item, results, seen, visited, depth) {
         var key;
         var children;
 
-        if (!item || depth > 12) {
-            return;
-        }
+        if (!item || depth >= 64) return;
+
+        key = getItemSelectionKey(item);
+        if (key && visited[key]) return;
+        if (key) visited[key] = true;
 
         if (safeTypename(item) === "PlacedItem") {
-            key = getItemSelectionKey(item);
             if (key && !seen[key]) {
                 results.push(item);
                 seen[key] = true;
@@ -983,7 +952,7 @@ SCRIPTMETA-END
 
         children = getChildPageItems(item);
         for (var i = 0; i < children.length; i++) {
-            collectPlacedItemsFromItem(children[i], results, seen, depth + 1);
+            collectPlacedItemsFromItem(children[i], results, seen, visited, depth + 1);
         }
     }
 
@@ -1023,265 +992,243 @@ SCRIPTMETA-END
         return null;
     }
 
+    function getItemUuid(item) {
+        if (!item) return "";
+        try { return String(item.uuid || ""); } catch (uuidError) { return ""; }
+    }
+
     function findClippingMaskForPlacedItem(item) {
-        var parent = null;
-        var mask = null;
-
-        try {
-            parent = item.parent;
-        } catch (parentError) {
-            parent = null;
-        }
-
-        if (!parent) {
-            return null;
-        }
-
-        if (safeTypename(parent) === "GroupItem") {
-            mask = findClippingMaskInContainer(parent);
-            if (mask) {
-                return mask;
+        var found = [];
+        var ancestor = null;
+        try { ancestor = item.parent; } catch (parentError) { ancestor = null; }
+        var depth = 0;
+        while (ancestor && depth < 64) {
+            if (safeTypename(ancestor) === "GroupItem" && isClippedGroup(ancestor)) {
+                found.push(findMaskInDirectChildren(ancestor));
             }
+            var next = null;
+            try { next = ancestor.parent; } catch (ancestorError) { next = null; }
+            if (!next || next === ancestor) break;
+            ancestor = next;
+            depth++;
         }
-
-        try {
-            if (parent.parent && parent.parent !== parent && safeTypename(parent.parent) === "GroupItem") {
-                return findClippingMaskInContainer(parent.parent);
-            }
-        } catch (grandParentError) {}
-
-        return null;
+        if (!found.length) {
+            return {status: "none", reason: uiText("noClippingMask"), group: null, maskRoot: null, paths: []};
+        }
+        for (var index = 0; index < found.length; index++) {
+            if (found[index].status !== "ok") return found[index];
+        }
+        if (found.length > 1) {
+            return {status: "unsupported", reason: uiText("nestedClippingMasks"), group: null, maskRoot: null, paths: []};
+        }
+        return found[0];
     }
 
-    function findClippingMaskInContainer(container) {
-        var mask = findClippingPathInCollection(container.pathItems);
-        var compoundItems;
-
-        if (mask) {
-            return mask;
-        }
-
-        try {
-            compoundItems = container.compoundPathItems;
-            for (var idx = 0; idx < compoundItems.length; idx++) {
-                mask = findClippingPathInCollection(compoundItems[idx].pathItems);
-                if (mask) {
-                    return mask;
-                }
+    function findMaskInDirectChildren(group) {
+        var roots = [];
+        var pageItems = group.pageItems;
+        for (var index = 0; index < pageItems.length; index++) {
+            var child = pageItems[index];
+            if (!hasDirectParent(child, group)) continue;
+            var type = safeTypename(child);
+            if (type === "PathItem" && isClippingPath(child)) {
+                roots.push({root: child, paths: [child]});
+            } else if (type === "CompoundPathItem") {
+                var compoundPaths = collectCompoundClippingPaths(child);
+                if (compoundPaths.length) roots.push({root: child, paths: compoundPaths});
             }
-        } catch (compoundError) {}
-
-        return null;
+        }
+        if (roots.length !== 1) {
+            return {
+                status: "unsupported",
+                reason: roots.length ? uiText("multipleClippingPaths") : uiText("clippingPathUnavailable"),
+                group: group,
+                maskRoot: null,
+                paths: []
+            };
+        }
+        for (var pathIndex = 0; pathIndex < roots[0].paths.length; pathIndex++) {
+            if (!isClosedPath(roots[0].paths[pathIndex])) {
+                return {
+                    status: "unsupported",
+                    reason: uiText("openClippingPath"),
+                    group: group,
+                    maskRoot: roots[0].root,
+                    paths: []
+                };
+            }
+        }
+        return {
+            status: "ok",
+            reason: "",
+            group: group,
+            maskRoot: roots[0].root,
+            paths: roots[0].paths
+        };
     }
 
-    function findClippingPathInCollection(pathItems) {
-        if (!pathItems) {
-            return null;
-        }
+    function collectCompoundClippingPaths(compound) {
+        var paths = [];
+        var hasClippingFlag = false;
         try {
-            for (var idx = 0; idx < pathItems.length; idx++) {
-                var pathItem = pathItems[idx];
-                try {
-                    if (pathItem.clipping) {
-                        return pathItem;
-                    }
-                } catch (clippingError) {}
+            for (var index = 0; index < compound.pathItems.length; index++) {
+                var path = compound.pathItems[index];
+                if (isClippingPath(path)) hasClippingFlag = true;
+                paths.push(path);
             }
-        } catch (collectionError) {}
-        return null;
+        } catch (compoundError) { return []; }
+        return hasClippingFlag ? paths : [];
     }
 
-    function getMaskDocumentPoints(maskItem) {
-        var points = [];
-        var pathPoints;
-        var anchor;
-        var bounds;
-
-        try {
-            pathPoints = maskItem.pathPoints;
-            for (var idx = 0; idx < pathPoints.length; idx++) {
-                anchor = pathPoints[idx].anchor;
-                if (anchor && anchor.length >= 2) {
-                    points.push([Number(anchor[0]), Number(anchor[1])]);
-                }
+    function getMaskBezierSegments(maskDescriptor) {
+        var segments = [];
+        var paths = maskDescriptor && maskDescriptor.paths ? maskDescriptor.paths : [];
+        for (var pathIndex = 0; pathIndex < paths.length; pathIndex++) {
+            var path = paths[pathIndex];
+            var points = path.pathPoints;
+            if (!points || points.length < 2 || !isClosedPath(path)) return [];
+            for (var pointIndex = 0; pointIndex < points.length; pointIndex++) {
+                var nextIndex = (pointIndex + 1) % points.length;
+                var start = readPoint(points[pointIndex].anchor);
+                var control1 = readPoint(points[pointIndex].rightDirection);
+                var control2 = readPoint(points[nextIndex].leftDirection);
+                var end = readPoint(points[nextIndex].anchor);
+                if (!start || !control1 || !control2 || !end) return [];
+                segments.push([start, control1, control2, end]);
             }
-        } catch (pathPointError) {
-            points = [];
         }
+        return segments;
+    }
 
-        if (points.length > 0) {
-            return points;
+    function getBezierBounds(segments, axes) {
+        if (!segments || !segments.length || !axes) return null;
+        var result = null;
+        for (var index = 0; index < segments.length; index++) {
+            var projected = [];
+            for (var pointIndex = 0; pointIndex < segments[index].length; pointIndex++) {
+                projected.push(projectPointToAxes(segments[index][pointIndex], axes));
+            }
+            result = mergeBounds(result, getCubicBounds(projected));
         }
+        return result;
+    }
 
-        bounds = getBestBounds(maskItem);
-        if (!bounds) {
-            return null;
+    function projectPointToAxes(point, axes) {
+        var determinant = axes.axisX[0] * axes.axisY[1] - axes.axisX[1] * axes.axisY[0];
+        if (Math.abs(determinant) <= GEOMETRY_EPSILON) return [NaN, NaN];
+        return [
+            (point[0] * axes.axisY[1] - point[1] * axes.axisY[0]) / determinant,
+            (axes.axisX[0] * point[1] - axes.axisX[1] * point[0]) / determinant
+        ];
+    }
+
+    function getCubicBounds(segment) {
+        var xParameters = [0, 1];
+        var yParameters = [0, 1];
+        appendCubicRoots(xParameters, segment[0][0], segment[1][0], segment[2][0], segment[3][0]);
+        appendCubicRoots(yParameters, segment[0][1], segment[1][1], segment[2][1], segment[3][1]);
+        var xs = [];
+        var ys = [];
+        var index;
+        for (index = 0; index < xParameters.length; index++) {
+            xs.push(evaluateCubic(segment[0][0], segment[1][0], segment[2][0], segment[3][0], xParameters[index]));
         }
+        for (index = 0; index < yParameters.length; index++) {
+            ys.push(evaluateCubic(segment[0][1], segment[1][1], segment[2][1], segment[3][1], yParameters[index]));
+        }
+        return {minX: arrayMin(xs), maxX: arrayMax(xs), minY: arrayMin(ys), maxY: arrayMax(ys)};
+    }
 
-        return boundsToQuad(bounds);
+    function appendCubicRoots(values, p0, p1, p2, p3) {
+        var a = 3 * (-p0 + 3 * p1 - 3 * p2 + p3);
+        var b = 2 * (3 * p0 - 6 * p1 + 3 * p2);
+        var c = -3 * p0 + 3 * p1;
+        var scale = Math.max(1, Math.abs(a), Math.abs(b), Math.abs(c));
+        var epsilon = GEOMETRY_EPSILON * scale;
+        if (Math.abs(a) <= epsilon) {
+            if (Math.abs(b) > epsilon) appendUnitRoot(values, -c / b);
+            return;
+        }
+        var discriminant = b * b - 4 * a * c;
+        if (discriminant < -epsilon * scale) return;
+        if (discriminant < 0) discriminant = 0;
+        var squareRoot = Math.sqrt(discriminant);
+        appendUnitRoot(values, (-b + squareRoot) / (2 * a));
+        appendUnitRoot(values, (-b - squareRoot) / (2 * a));
+    }
+
+    function appendUnitRoot(values, value) {
+        if (!(value > 0 && value < 1)) return;
+        for (var index = 0; index < values.length; index++) {
+            if (Math.abs(values[index] - value) <= GEOMETRY_EPSILON) return;
+        }
+        values.push(value);
+    }
+
+    function evaluateCubic(p0, p1, p2, p3, t) {
+        var inverse = 1 - t;
+        return inverse * inverse * inverse * p0 +
+            3 * inverse * inverse * t * p1 +
+            3 * inverse * t * t * p2 +
+            t * t * t * p3;
     }
 
     function getCurrentItemTopLeft(item) {
         var quad = getPlacedItemQuad(item);
-        if (quad && quad.length >= 4) {
-            return quad[0];
-        }
-
-        try {
-            return [Number(item.left), Number(item.top)];
-        } catch (positionError) {}
-
-        return null;
-    }
-
-    function getCurrentItemSize(item) {
-        try {
-            return {
-                width: Math.abs(Number(item.width)),
-                height: Math.abs(Number(item.height))
-            };
-        } catch (e) {}
-        return null;
-    }
-
-    function getItemBoundsCenter(item) {
-        var bounds = getBestBounds(item);
-        if (!bounds) {
-            return null;
-        }
-        return getBoundsCenter(bounds);
+        return quad && quad.length >= 4 ? quad[0] : null;
     }
 
     function getPlacedItemQuad(item) {
-        var matrixQuad = getMatrixPlacedItemQuad(item);
-        if (matrixQuad) {
-            return matrixQuad;
-        }
-        return boundsToQuad(getBestBounds(item));
-    }
-
-    function getMatrixPlacedItemQuad(item) {
         try {
             var matrix = item.matrix;
-            var box = item.boundingBox;
-            var bounds = getBestBounds(item);
-            var scaleX;
-            var scaleY;
-            var width;
-            var height;
-            var axisX;
-            var axisY;
-            var center;
-            var halfX;
-            var halfY;
-
-            if (!matrix || !box || box.length < 4 || !bounds || bounds.length < 4) {
-                return null;
-            }
-
-            scaleX = vectorLength([getNumber(matrix.mValueA), getNumber(matrix.mValueB)]);
-            scaleY = vectorLength([getNumber(matrix.mValueC), getNumber(matrix.mValueD)]);
-            width = Math.abs(getNumber(box[2]) - getNumber(box[0])) * scaleX;
-            height = Math.abs(getNumber(box[1]) - getNumber(box[3])) * scaleY;
-            if (width <= 0 || height <= 0) {
-                return null;
-            }
-
-            axisX = normalizeVector([getNumber(matrix.mValueA), -getNumber(matrix.mValueB)]);
-            axisY = normalizeVector([-getNumber(matrix.mValueC), getNumber(matrix.mValueD)]);
-            if (!vectorLength(axisX) || !vectorLength(axisY)) {
-                return null;
-            }
-
-            center = getBoundsCenter(bounds);
-            halfX = scalePoint(axisX, width / 2);
-            halfY = scalePoint(axisY, height / 2);
-
+            var sourceSize = getPlacedItemSourceSize(item);
+            var bounds = readNumberArray(item.geometricBounds, 4);
+            if (!matrix || !sourceSize || !bounds) return null;
+            var a = readFiniteNumber(matrix.mValueA);
+            var b = readFiniteNumber(matrix.mValueB);
+            var c = readFiniteNumber(matrix.mValueC);
+            var d = readFiniteNumber(matrix.mValueD);
+            if (a === null || b === null || c === null || d === null) return null;
+            var edgeX = [sourceSize.width * a, sourceSize.width * -b];
+            var edgeY = [sourceSize.height * -c, sourceSize.height * d];
+            var center = [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2];
+            var topLeft = subtractPoints(center, scalePoint(addPoints(edgeX, edgeY), 0.5));
+            var topRight = addPoints(topLeft, edgeX);
+            var bottomLeft = addPoints(topLeft, edgeY);
             return [
-                subtractPoints(subtractPoints(center, halfX), halfY),
-                subtractPoints(addPoints(center, halfX), halfY),
-                addPoints(addPoints(center, halfX), halfY),
-                addPoints(subtractPoints(center, halfX), halfY)
+                topLeft,
+                topRight,
+                addPoints(topRight, edgeY),
+                bottomLeft
             ];
-        } catch (matrixQuadError) {
+        } catch (quadError) {
             return null;
         }
     }
 
-    function getAxesFromItem(item) {
-        try {
-            return getAxesFromMatrix(item.matrix);
-        } catch (matrixError) {}
-        return null;
+    function getPlacedItemSourceSize(item) {
+        var box = null;
+        try { box = readNumberArray(item.boundingBox, 4); } catch (boundingBoxError) { box = null; }
+        if (!box) return null;
+        var width = Math.abs(box[2] - box[0]);
+        var height = Math.abs(box[1] - box[3]);
+        return width > GEOMETRY_EPSILON && height > GEOMETRY_EPSILON
+            ? {width: width, height: height}
+            : null;
     }
 
     function getAxesFromMatrix(matrix) {
-        var axisX;
-        var axisY;
-
-        if (!matrix) {
-            return null;
-        }
-
-        axisX = normalizeVector([getNumber(matrix.mValueA), -getNumber(matrix.mValueB)]);
-        axisY = normalizeVector([-getNumber(matrix.mValueC), getNumber(matrix.mValueD)]);
-        if (!vectorLength(axisX) || !vectorLength(axisY)) {
-            return null;
-        }
-
-        return {
-            axisX: axisX,
-            axisY: axisY,
-            rotation: Math.atan2(getNumber(matrix.mValueB), getNumber(matrix.mValueA)) * 180 / Math.PI,
-            determinant: getNumber(matrix.mValueA) * getNumber(matrix.mValueD) - getNumber(matrix.mValueB) * getNumber(matrix.mValueC)
-        };
-    }
-
-    function getBestBounds(item) {
-        try {
-            var geometricBounds = item.geometricBounds;
-            if (geometricBounds && geometricBounds.length >= 4) {
-                return [
-                    Number(geometricBounds[0]),
-                    Number(geometricBounds[1]),
-                    Number(geometricBounds[2]),
-                    Number(geometricBounds[3])
-                ];
-            }
-        } catch (geometricBoundsError) {}
-
-        try {
-            var visibleBounds = item.visibleBounds;
-            if (visibleBounds && visibleBounds.length >= 4) {
-                return [
-                    Number(visibleBounds[0]),
-                    Number(visibleBounds[1]),
-                    Number(visibleBounds[2]),
-                    Number(visibleBounds[3])
-                ];
-            }
-        } catch (visibleBoundsError) {}
-
-        return null;
-    }
-
-    function boundsToQuad(bounds) {
-        if (!bounds || bounds.length < 4) {
-            return null;
-        }
-        return [
-            [getNumber(bounds[0]), getNumber(bounds[1])],
-            [getNumber(bounds[2]), getNumber(bounds[1])],
-            [getNumber(bounds[2]), getNumber(bounds[3])],
-            [getNumber(bounds[0]), getNumber(bounds[3])]
-        ];
-    }
-
-    function getBoundsCenter(bounds) {
-        return [
-            (getNumber(bounds[0]) + getNumber(bounds[2])) / 2,
-            (getNumber(bounds[1]) + getNumber(bounds[3])) / 2
-        ];
+        if (!matrix) return null;
+        var a = readFiniteNumber(matrix.mValueA);
+        var b = readFiniteNumber(matrix.mValueB);
+        var c = readFiniteNumber(matrix.mValueC);
+        var d = readFiniteNumber(matrix.mValueD);
+        if (a === null || b === null || c === null || d === null) return null;
+        var axisX = normalizeVector([a, -b]);
+        var axisY = normalizeVector([-c, d]);
+        var determinant = axisX[0] * axisY[1] - axisX[1] * axisY[0];
+        if (Math.abs(determinant) <= GEOMETRY_EPSILON) return null;
+        return {axisX: axisX, axisY: axisY, determinant: determinant};
     }
 
     function translateItem(item, dx, dy) {
@@ -1289,14 +1236,65 @@ SCRIPTMETA-END
             item.translate(dx, dy);
             return true;
         } catch (translateError) {}
-
-        try {
-            item.left = Number(item.left) + dx;
-            item.top = Number(item.top) + dy;
-            return true;
-        } catch (positionError) {}
-
         return false;
+    }
+
+    function hasDirectParent(item, parent) {
+        try { return item.parent === parent; } catch (parentError) { return false; }
+    }
+
+    function isClippedGroup(group) {
+        try { return group.clipped === true; } catch (clippedError) { return false; }
+    }
+
+    function isClippingPath(path) {
+        try { return path.clipping === true; } catch (clippingError) { return false; }
+    }
+
+    function isClosedPath(path) {
+        try { return path.closed === true; } catch (closedError) { return false; }
+    }
+
+    function readPoint(value) {
+        return readNumberArray(value, 2);
+    }
+
+    function readNumberArray(value, minimumLength) {
+        if (!value || value.length < minimumLength) return null;
+        var result = [];
+        for (var index = 0; index < minimumLength; index++) {
+            var numberValue = readFiniteNumber(value[index]);
+            if (numberValue === null) return null;
+            result.push(numberValue);
+        }
+        return result;
+    }
+
+    function readFiniteNumber(value) {
+        var numberValue = Number(value);
+        return isFinite(numberValue) ? numberValue : null;
+    }
+
+    function mergeBounds(first, second) {
+        if (!first) return second;
+        return {
+            minX: Math.min(first.minX, second.minX),
+            maxX: Math.max(first.maxX, second.maxX),
+            minY: Math.min(first.minY, second.minY),
+            maxY: Math.max(first.maxY, second.maxY)
+        };
+    }
+
+    function arrayMin(values) {
+        var result = values[0];
+        for (var index = 1; index < values.length; index++) if (values[index] < result) result = values[index];
+        return result;
+    }
+
+    function arrayMax(values) {
+        var result = values[0];
+        for (var index = 1; index < values.length; index++) if (values[index] > result) result = values[index];
+        return result;
     }
 
     function safeTypename(item) {
@@ -1337,10 +1335,6 @@ SCRIPTMETA-END
 
     function vectorLength(vector) {
         return Math.sqrt(getNumber(vector[0]) * getNumber(vector[0]) + getNumber(vector[1]) * getNumber(vector[1]));
-    }
-
-    function dotProduct(a, b) {
-        return getNumber(a[0]) * getNumber(b[0]) + getNumber(a[1]) * getNumber(b[1]);
     }
 
     function mmToPt(value) {
