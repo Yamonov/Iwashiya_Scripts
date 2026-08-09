@@ -1,3 +1,5 @@
+#target photoshop
+
 /*
 <javascriptresource>
 <name>InDesignに合わせてリサイズ・トリミング</name>
@@ -5,8 +7,8 @@
 </javascriptresource>
 
 SCRIPTMETA-BEGIN
-Script-ID=org.iwashi.Photoshop_InDesign_ResizeCrop
-Version=1
+Script-ID=org.iwashi.Photoshop_InDesign_Resize
+Version=2.0
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=InDesign配置に合わせてリサイズ・トリミング
 Author=Murakami Yoshiteru
@@ -18,10 +20,9 @@ Photoshopで開いている画像を、InDesignドキュメント上の配置サ
 配置したInDesignドキュメントを開いておき、Photoshopから実行してください。
 
 トリミング処理は「伸ばし/トリミングを行わない」「伸ばして、トリム部分にガイドを引く（画像を削りません）」
-「伸ばして、トリム部分を切り抜く」から選択できます。
-ガイドを引く場合は、InDesignの配置フレーム情報をXMPメタデータに記録します。
-切り抜く場合は、後の処理で誤って使われないように対象のXMPタグを削除します。
-切り抜いた画像は、InDesignでリンク更新後に「内容をフレームに合わせる」等で配置できます。
+「伸ばして、トリム部分を切り抜く（フレーム外を削除します）」から選択できます。
+ガイドを引く場合も切り抜く場合も、InDesignの配置フレーム情報をXMPメタデータに記録します。
+伸ばし処理後は、InDesign側のスクリプトで処理してください。
 
 拡張子やパスの違う画像ファイルでも処理できますが、同一性の担保はご自身で行ってください。
 Description-END
@@ -71,8 +72,7 @@ var HISTORY_NAME = localText("InDesignに合わせてリサイズ・トリミン
 var TRIMMING_MODE_NONE = "none";
 var TRIMMING_MODE_GUIDES = "extendWithGuides";
 var TRIMMING_MODE_CROP = "extendAndCrop";
-var METADATA_ACTION_WRITE = "write";
-var METADATA_ACTION_REMOVE = "remove";
+var INDESIGN_BASE_TARGET = "indesign";
 
 function readSelfHeaderMeta() {
     var meta = {
@@ -137,6 +137,96 @@ var SMART_OBJECT_INTERP_WARNING = localText(
 var __HISTORY_CTX__ = null;
 var __HISTORY_DID_RUN__ = false;
 
+function getPhotoshopDocumentId(doc) {
+    try {
+        return Number(doc.id);
+    } catch (_documentIdError) { }
+    return NaN;
+}
+
+function createPhotoshopDocumentSession(doc) {
+    if (!doc) {
+        throw new Error(localText(
+            "処理対象のPhotoshopドキュメントを取得できません。",
+            "The target Photoshop document could not be obtained."
+        ));
+    }
+    var documentId = getPhotoshopDocumentId(doc);
+    if (!isFinite(documentId)) {
+        throw new Error(localText(
+            "処理対象のPhotoshopドキュメントIDを取得できません。",
+            "The target Photoshop document ID could not be obtained."
+        ));
+    }
+    var documentPath = "";
+    try {
+        documentPath = _normPathLocal(doc.fullName.fsName);
+    } catch (_documentPathError) { }
+    return {
+        documentRef: doc,
+        documentId: documentId,
+        documentPath: documentPath,
+        documentName: String(doc.name || ""),
+        initialWidthPx: Math.round(doc.width.as("px")),
+        initialHeightPx: Math.round(doc.height.as("px")),
+        initialResolution: Number(doc.resolution)
+    };
+}
+
+function assertPhotoshopDocumentSession(session) {
+    if (!session || !session.documentRef || !isFinite(Number(session.documentId))) {
+        throw new Error(localText(
+            "処理対象のPhotoshopドキュメント情報が失われました。",
+            "The target Photoshop document information is no longer available."
+        ));
+    }
+    if (!app.documents.length) {
+        throw new Error(localText(
+            "処理対象のPhotoshopドキュメントが閉じられました。",
+            "The target Photoshop document was closed."
+        ));
+    }
+    var activeDocumentId = getPhotoshopDocumentId(app.activeDocument);
+    if (activeDocumentId !== Number(session.documentId)) {
+        throw new Error(localText(
+            "処理対象のPhotoshopドキュメントが切り替わりました。",
+            "The target Photoshop document changed."
+        ));
+    }
+    var referenceId = getPhotoshopDocumentId(session.documentRef);
+    if (referenceId !== Number(session.documentId)) {
+        throw new Error(localText(
+            "処理対象のPhotoshopドキュメントを確認できません。",
+            "The target Photoshop document could not be verified."
+        ));
+    }
+    if (session.documentPath) {
+        var currentPath = "";
+        try { currentPath = _normPathLocal(session.documentRef.fullName.fsName); } catch (_pathError) {}
+        if (!currentPath || currentPath !== String(session.documentPath)) {
+            throw new Error(localText(
+                "処理対象のPhotoshopドキュメントの保存先が変更されています。",
+                "The target Photoshop document path has changed."
+            ));
+        }
+    }
+    if (Math.round(session.documentRef.width.as("px")) !== Number(session.initialWidthPx) ||
+            Math.round(session.documentRef.height.as("px")) !== Number(session.initialHeightPx) ||
+            Math.abs(Number(session.documentRef.resolution) - Number(session.initialResolution)) > 0.000001) {
+        throw new Error(localText(
+            "処理対象のPhotoshopドキュメントの寸法または解像度が変更されています。",
+            "The target Photoshop document dimensions or resolution have changed."
+        ));
+    }
+    if (session.documentRef.saved !== true) {
+        throw new Error(localText(
+            "処理対象のPhotoshopドキュメントに未保存の変更があります。",
+            "The target Photoshop document has unsaved changes."
+        ));
+    }
+    return session.documentRef;
+}
+
 function hasSmartObjectRecursive(container) {
     try {
         var layers = container.layers;
@@ -160,11 +250,17 @@ function containsSmartObject(doc) {
     }
 }
 
-function runWithHistory(historyName, fnName) {
-    var doc = app.activeDocument;
+function runWithHistory(session, historyName, fnName) {
+    var doc = assertPhotoshopDocumentSession(session);
     __HISTORY_DID_RUN__ = false;
     try {
         doc.suspendHistory(historyName, fnName);
+        if (__HISTORY_DID_RUN__ !== true) {
+            throw new Error(localText(
+                "履歴処理を開始できませんでした。",
+                "The history operation could not be started."
+            ));
+        }
         return {
             ok: true
         };
@@ -185,9 +281,8 @@ function restoreHistoryStateAfterFailure(doc, historyState) {
     return false;
 }
 
-function getHistoryStatusByName(name) {
+function getHistoryStatusByName(doc, name) {
     try {
-        var doc = app.activeDocument;
         var hs = doc.historyStates;
         var activeIndex = -1;
         for (var i = 0; i < hs.length; i++) {
@@ -220,8 +315,13 @@ function getHistoryStatusByName(name) {
 function performResizeFromCtx() {
     __HISTORY_DID_RUN__ = true;
     var ctx = __HISTORY_CTX__;
-    if (!ctx) return;
-    var doc = app.activeDocument;
+    if (!ctx || !ctx.photoshopSession) {
+        throw new Error(localText(
+            "処理対象のPhotoshopドキュメント情報がありません。",
+            "The target Photoshop document information is unavailable."
+        ));
+    }
+    var doc = assertPhotoshopDocumentSession(ctx.photoshopSession);
     var newWidthPx = ctx.newWidthPx;
     var newHeightPx = ctx.newHeightPx;
     var targetPPI = ctx.targetPPI;
@@ -229,7 +329,6 @@ function performResizeFromCtx() {
     var upscaleMethod = ctx.upscaleMethod;
     var downscaleMethod = ctx.downscaleMethod;
     var trimmingMode = ctx.trimmingMode || TRIMMING_MODE_NONE;
-    var metadataAction = ctx.metadataAction || "";
 
     if (scaleRatio < 1) {
         // 縮小
@@ -269,23 +368,12 @@ function performResizeFromCtx() {
             Math.round(doc.width.as("px")),
             Math.round(doc.height.as("px"))
         );
-        if (metadataAction === METADATA_ACTION_WRITE) {
-            ctx.cropResponse.__integrationMetadataChangeAttempted = true;
-            if (!CropIntegration.writeMetadata(doc, ctx.cropResponse)) {
-                throw new Error(localText(
-                    "XMPタグの埋め込みに失敗しました。",
-                    "The XMP tag could not be embedded."
-                ));
-            }
-        } else if (metadataAction === METADATA_ACTION_REMOVE &&
-                ctx.cropResponse.__integrationMetadataRemovalNeeded === true) {
-            ctx.cropResponse.__integrationMetadataChangeAttempted = true;
-            if (!CropIntegration.removeMetadata(doc, ctx.cropResponse)) {
-                throw new Error(localText(
-                    "XMPタグの削除に失敗しました。",
-                    "The XMP tag could not be removed."
-                ));
-            }
+        ctx.cropResponse.__integrationMetadataChangeAttempted = true;
+        if (!CropIntegration.writeMetadata(doc, ctx.cropResponse)) {
+            throw new Error(localText(
+                "XMPタグの埋め込みに失敗しました。",
+                "The XMP tag could not be embedded."
+            ));
         }
     }
 
@@ -343,11 +431,11 @@ function saveUsePrevOnly(flag) {
 function modeToString(documentMode) {
     switch (documentMode) {
         case DocumentMode.BITMAP:
-            return "Bitmap";
+            return localText("モノクロ2階調", "Bitmap");
         case DocumentMode.GRAYSCALE:
-            return "Grayscale";
+            return localText("グレースケール", "Grayscale");
         case DocumentMode.INDEXEDCOLOR:
-            return "Indexed";
+            return localText("インデックスカラー", "Indexed Color");
         case DocumentMode.RGB:
             return "RGB";
         case DocumentMode.CMYK:
@@ -355,11 +443,11 @@ function modeToString(documentMode) {
         case DocumentMode.LAB:
             return "Lab";
         case DocumentMode.MULTICHANNEL:
-            return "Multichannel";
+            return localText("マルチチャンネル", "Multichannel");
         case DocumentMode.DUOTONE:
-            return "Duotone";
+            return localText("ダブルトーン", "Duotone");
         default:
-            return "Unknown";
+            return localText("不明", "Unknown");
     }
 }
 
@@ -371,7 +459,7 @@ function parseBridgeTalkJson(responseText, rawResponse, appLabel) {
         try {
             return eval("(" + normalized + ")");
         } catch (evalError) {
-            alert(appLabel + localText("応答の解析に失敗しました。", " response could not be parsed.") + "\nraw: " + rawResponse);
+            alert(appLabel + localText("応答の解析に失敗しました。\n元の応答: ", " response could not be parsed.\nRaw response: ") + rawResponse);
             return null;
         }
     }
@@ -484,12 +572,28 @@ function sendBridgeTalkAndWait(target, body, timeoutMs) {
         responseBody = resultEvent.body;
     };
     bridgeTalk.onError = function(errorEvent) {
-        errorBody = errorEvent && errorEvent.body ? errorEvent.body : "unknown";
+        errorBody = errorEvent && errorEvent.body
+            ? errorEvent.body
+            : localText("不明なエラー", "Unknown error");
     };
     try {
         bridgeTalk.timeout = Math.max(1, Math.round((timeoutMs || 30000) / 1000));
     } catch (error) {}
-    bridgeTalk.send();
+    var sendStarted = false;
+    try {
+        sendStarted = bridgeTalk.send() !== false;
+    } catch (sendError) {
+        return {
+            ok: false,
+            error: String(sendError)
+        };
+    }
+    if (!sendStarted) {
+        return {
+            ok: false,
+            error: localText("BridgeTalkメッセージを送信できませんでした。", "The BridgeTalk message could not be sent.")
+        };
+    }
 
     var startedAt = new Date().getTime();
     var waitMs = timeoutMs || 30000;
@@ -514,6 +618,132 @@ function sendBridgeTalkAndWait(target, body, timeoutMs) {
     return {
         ok: false,
         error: localText("タイムアウト", "Timeout")
+    };
+}
+
+function getInDesignMajorFromSpecifier(specifier) {
+    var match = String(specifier || "").match(/indesign-(\d+)/i);
+    return match ? Number(match[1]) : NaN;
+}
+
+function getRunningInDesignTargets() {
+    var latestSpecifier = "";
+    try {
+        latestSpecifier = String(BridgeTalk.getSpecifier(INDESIGN_BASE_TARGET) || "");
+    } catch (_specifierError) { }
+    var latestMajor = getInDesignMajorFromSpecifier(latestSpecifier);
+    if (!isFinite(latestMajor) || latestMajor < 1) {
+        return [];
+    }
+
+    var targets = [];
+    for (var major = latestMajor; major >= 1; major--) {
+        var target = INDESIGN_BASE_TARGET + "-" + major;
+        var appPath = "";
+        try {
+            appPath = String(BridgeTalk.getAppPath(target) || "");
+        } catch (_appPathError) { }
+        if (!appPath) continue;
+        var isRunning = false;
+        try {
+            isRunning = BridgeTalk.isRunning(target) === true;
+        } catch (_runningError) { }
+        if (!isRunning) continue;
+        targets.push(target);
+    }
+    return targets;
+}
+
+function bringInDesignTargetToFront(target) {
+    if (!target) return false;
+    try {
+        BridgeTalk.bringToFront(target);
+        return true;
+    } catch (_bringToFrontError) { }
+    return false;
+}
+
+function requestInitialInDesignCandidates(inDesignFunctionSource, imagePath, imageName) {
+    var targets = getRunningInDesignTargets();
+    if (!targets.length) {
+        return {
+            ok: false,
+            error: localText(
+                "起動中のInDesignが見つかりません。対象ドキュメントを開いてから実行してください。",
+                "No running InDesign application was found. Open the target document and run the script again."
+            )
+        };
+    }
+
+    var exactItems = [];
+    var nameOnlyItems = [];
+    var hasFolderDifference = false;
+    var hasExtensionDifference = false;
+    var communicationErrors = [];
+
+    function appendItems(responseObject, bridgeTarget) {
+        if (!responseObject || !responseObject.items || !responseObject.items.length) return;
+        var documentInfo = responseObject.documentInfo || {};
+        var destination = responseObject.matchType === "nameOnly" ? nameOnlyItems : exactItems;
+        for (var itemIndex = 0; itemIndex < responseObject.items.length; itemIndex++) {
+            var item = responseObject.items[itemIndex] || {};
+            item.bridgeTarget = bridgeTarget;
+            if (!item.applicationVersion) item.applicationVersion = String(documentInfo.applicationVersion || "");
+            if (item.documentId == null) item.documentId = documentInfo.documentId;
+            if (!item.documentName) item.documentName = String(documentInfo.documentName || "");
+            if (!item.documentPath) item.documentPath = String(documentInfo.documentPath || "");
+            destination.push(item);
+        }
+        hasFolderDifference = hasFolderDifference || !!responseObject.hasFolderDifference;
+        hasExtensionDifference = hasExtensionDifference || !!responseObject.hasExtensionDifference;
+    }
+
+    for (var targetIndex = 0; targetIndex < targets.length; targetIndex++) {
+        var bridgeTarget = targets[targetIndex];
+        var requestBody = "(" + inDesignFunctionSource + ")(" + toSourceLiteral({
+            pathFs: encodeURIComponent(imagePath),
+            fileName: String(imageName || ""),
+            bridgeTarget: bridgeTarget
+        }) + ");";
+        var bridgeResult = sendBridgeTalkAndWait(bridgeTarget, requestBody, 30000);
+        if (!bridgeResult.ok) {
+            communicationErrors.push(bridgeTarget + ": " + bridgeResult.error);
+            continue;
+        }
+        if (!bridgeResult.body || bridgeResult.body === "null") continue;
+        var responseObject = parseBridgeTalkJson(bridgeResult.body, bridgeResult.body, bridgeTarget);
+        if (!responseObject) {
+            communicationErrors.push(bridgeTarget + ": " + localText("応答を解析できません。", "The response could not be parsed."));
+            continue;
+        }
+        appendItems(responseObject, bridgeTarget);
+    }
+
+    if (communicationErrors.length) {
+        return {
+            ok: false,
+            error: localText(
+                "一部のInDesignから配置情報を取得できませんでした。",
+                "Placement information could not be obtained from one or more InDesign applications."
+            ) + "\n" + communicationErrors.join("\n")
+        };
+    }
+
+    var selectedItems = exactItems.length ? exactItems : nameOnlyItems;
+    if (!selectedItems.length) {
+        return {
+            ok: true,
+            value: null
+        };
+    }
+    return {
+        ok: true,
+        value: {
+            matchType: exactItems.length ? "exact" : "nameOnly",
+            hasFolderDifference: hasFolderDifference,
+            hasExtensionDifference: hasExtensionDifference,
+            items: selectedItems
+        }
     };
 }
 
@@ -687,45 +917,6 @@ function showFallbackLinkConfirmDialog(options) {
     return "cancel";
 }
 
-function buildInDesignChooserPayload(items, initialLinkIndex, options) {
-    var dialogOptions = options || {};
-
-    function encodeChooserText(text) {
-        return encodeURI(String(text || ""));
-    }
-
-    function encodeChooserItems(sourceItems) {
-        var encodedItems = [];
-        var itemList = sourceItems || [];
-        for (var i = 0; i < itemList.length; i++) {
-            var item = itemList[i] || {};
-            var encodedItem = {};
-            for (var key in item) {
-                if (!item.hasOwnProperty(key)) continue;
-                encodedItem[key] = item[key];
-            }
-            encodedItem.fileName = encodeChooserText(item.fileName || "");
-            encodedItem.folderPath = encodeChooserText(item.folderPath || "");
-            encodedItem.displayFileName = encodeChooserText(item.displayFileName || "");
-            encodedItem.displayFolderPath = encodeChooserText(item.displayFolderPath || "");
-            encodedItem.rawFileName = encodeChooserText(item.rawFileName || "");
-            encodedItem.rawFilePath = encodeChooserText(item.rawFilePath || "");
-            encodedItems.push(encodedItem);
-        }
-        return encodedItems;
-    }
-
-    return {
-        items: encodeChooserItems(items),
-        initialLinkIndex: initialLinkIndex,
-        title: dialogOptions.title || localText("リンクを選択", "Select Link"),
-        messageLine1: dialogOptions.messageLine1 || "",
-        messageLine2: dialogOptions.messageLine2 || "",
-        messageLine3: dialogOptions.messageLine3 || "",
-        photoshopPathRaw: encodeChooserText(dialogOptions.photoshopPathRaw || "")
-    };
-}
-
 function buildNameOnlyMessageLine1(hasFolderDifference, hasExtensionDifference) {
     if (hasFolderDifference && hasExtensionDifference) {
         return localText("拡張子とパスが異なる画像がありました。", "An image with a different extension and path was found.");
@@ -739,65 +930,66 @@ function buildNameOnlyMessageLine1(hasFolderDifference, hasExtensionDifference) 
     return localText("同じ名前の画像が見つかりました。", "An image with the same name was found.");
 }
 
-function findInDesignMinMaxIndices(items) {
+function findLargestInDesignCandidateIndex(items) {
     var maxIndex = 0;
-    var minIndex = 0;
     var maxLongMM = -Infinity;
-    var minLongMM = Infinity;
     for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
         var itemLongMM = Number(items[itemIndex].placedLongMM) || 0;
         if (itemLongMM > maxLongMM) {
             maxLongMM = itemLongMM;
             maxIndex = itemIndex;
         }
-        if (itemLongMM < minLongMM) {
-            minLongMM = itemLongMM;
-            minIndex = itemIndex;
-        }
     }
-    return {
-        maxIndex: maxIndex,
-        minIndex: minIndex
-    };
+    return maxIndex;
 }
 
 function finalizeInDesignResizeFlow(ctx) {
-    if (!ctx || !ctx.targetItems || !ctx.targetItems.length || !ctx.targetItem) return;
-    var doc = app.activeDocument;
+    if (!ctx || !ctx.targetItem) return;
+    var doc = null;
+    try {
+        doc = assertPhotoshopDocumentSession(ctx.photoshopSession);
+    } catch (documentSessionError) {
+        alert(documentSessionError);
+        return;
+    }
     var docWidthPx = ctx.docWidthPx;
     var docHeightPx = ctx.docHeightPx;
     var currentPPI = ctx.currentPPI;
     var longPx = ctx.longPx;
     var imgPath = ctx.imgPath;
     var candidateItemsArray = ctx.candidateItemsArray;
-    var targetItems = ctx.targetItems;
     var targetItem = ctx.targetItem;
 
-    for (var targetLinkIndex = 0; targetLinkIndex < targetItems.length; targetLinkIndex++) {
-        var targetLinkStatus = targetItems[targetLinkIndex].linkStatus;
-        if (targetLinkStatus === 1) {
-            alert(localText("リンク切れ画像です。", "The linked image is missing."));
-            return;
-        } else if (targetLinkStatus === 2) {
-            alert(localText("リンクが更新されていません。", "The link is not updated."));
-            return;
-        }
+    if (targetItem.linkStatus === 1) {
+        alert(localText("リンク切れ画像です。", "The linked image is missing."));
+        return;
+    } else if (targetItem.linkStatus === 2) {
+        alert(localText("リンクが更新されていません。", "The link is not updated."));
+        return;
     }
 
-    var targetSizeInfo = findInDesignMinMaxIndices(targetItems);
-    var smallestItem = targetItems[targetSizeInfo.minIndex];
+    var comparisonItems = candidateItemsArray && candidateItemsArray.length ? candidateItemsArray : [targetItem];
     var hScale = targetItem.hScale;
     var vScale = targetItem.vScale;
     var placedWmm = targetItem.placedWmm;
     var placedHmm = targetItem.placedHmm;
     var placedLongMM = Math.max(placedWmm, placedHmm);
     var effectivePPI = targetItem.effectivePPI;
-    var minSizePpi = smallestItem.effectivePPI;
+    var minPlacedPPI = Infinity;
+    var maxPlacedPPI = -Infinity;
+    for (var comparisonIndex = 0; comparisonIndex < comparisonItems.length; comparisonIndex++) {
+        var comparisonPPI = Number(comparisonItems[comparisonIndex].effectivePPI);
+        if (!isFinite(comparisonPPI) || comparisonPPI <= 0) continue;
+        if (comparisonPPI < minPlacedPPI) minPlacedPPI = comparisonPPI;
+        if (comparisonPPI > maxPlacedPPI) maxPlacedPPI = comparisonPPI;
+    }
+    if (!isFinite(minPlacedPPI)) minPlacedPPI = effectivePPI;
+    if (!isFinite(maxPlacedPPI)) maxPlacedPPI = effectivePPI;
     var scaleDiff = Math.abs(hScale - vScale);
     var isUniformScale = scaleDiff <= 0.01;
 
-    function calcRequiredPx(longMM, ppi) {
-        return Math.round(longMM * ppi / 25.4);
+    function calcRequiredPixels(lengthMM, ppi) {
+        return Number(lengthMM) * Number(ppi) / 25.4;
     }
 
     var ppiLine = isUniformScale
@@ -811,14 +1003,10 @@ function finalizeInDesignResizeFlow(ctx) {
         scaleLine +
         localText("画像ピクセル: ", "Image pixels: ") + longPx + "\n";
 
-    var inDesignSelectionHandle = {
-        linkIndex: (targetItem.linkIndex != null) ? Number(targetItem.linkIndex) : null,
-        pathFs: encodeURI(imgPath),
-        items: candidateItemsArray
-    };
+    var inDesignSelectionHandle = buildPlacementHandle(targetItem);
 
     var hasSmartObject = containsSmartObject(doc);
-    var dialogResult = showConfirmDialog(messageBase, placedWmm, placedHmm, docWidthPx, docHeightPx, imgPath, hasSmartObject, effectivePPI, minSizePpi, targetItems.length, inDesignSelectionHandle, ctx.matchType === "nameOnly");
+    var dialogResult = showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, docHeightPx, imgPath, hasSmartObject, effectivePPI, minPlacedPPI, maxPlacedPPI, ctx.matchedItemCount || 1, inDesignSelectionHandle, ctx.matchType === "nameOnly");
     try {
         if (dialogResult && dialogResult.hasOwnProperty('usePrev')) saveUsePrevOnly(dialogResult.usePrev);
     } catch (_) { }
@@ -827,70 +1015,50 @@ function finalizeInDesignResizeFlow(ctx) {
     var upscaleMethod = dialogResult.method;
     var downscaleMethod = dialogResult.downMethod;
     var trimmingMode = dialogResult.trimmingMode || TRIMMING_MODE_NONE;
-    var metadataAction = trimmingMode === TRIMMING_MODE_GUIDES
-        ? METADATA_ACTION_WRITE
-        : (trimmingMode === TRIMMING_MODE_CROP ? METADATA_ACTION_REMOVE : "");
     var cropResponse = null;
-    var reqWpx = calcRequiredPx(placedWmm, targetPPI);
-    var reqHpx = calcRequiredPx(placedHmm, targetPPI);
+    var reqWpx = calcRequiredPixels(placedWmm, targetPPI);
+    var reqHpx = calcRequiredPixels(placedHmm, targetPPI);
     var scaleRatio = Math.max(reqWpx / docWidthPx, reqHpx / docHeightPx);
     var newWidthPx = Math.round(docWidthPx * scaleRatio);
     var newHeightPx = Math.round(docHeightPx * scaleRatio);
 
+    try {
+        cropResponse = getCropIntegration().prepare(doc, targetItem);
+    } catch (placementValidationError) {
+        alert(
+            localText(
+                "InDesignの配置を再確認できないため、処理を中止しました。",
+                "Processing was cancelled because the InDesign placement could not be revalidated."
+            ) + "\n" + placementValidationError
+        );
+        return;
+    }
+    if (!cropResponse) return;
+    try {
+        assertPhotoshopDocumentSession(ctx.photoshopSession);
+    } catch (documentCheckError) {
+        alert(documentCheckError);
+        return;
+    }
+
     if (trimmingMode !== TRIMMING_MODE_NONE) {
         try {
-            cropResponse = getCropIntegration().prepare(doc, targetItem.linkIndex);
-        } catch (cropInitializationError) {
+            if (!CropIntegration.preflightMetadata(doc, cropResponse)) {
+                throw new Error(localText("XMP配置情報がありません。", "XMP placement data is unavailable."));
+            }
+        } catch (xmpPreflightError) {
             alert(
                 localText(
-                    "トリミング処理を準備できないため、中止しました。",
-                    "Processing was cancelled because trimming could not be prepared."
-                ) + "\n" + cropInitializationError
+                    "XMPタグを準備できないため、画像処理を中止しました。",
+                    "Image processing was cancelled because the XMP tag could not be prepared."
+                ) + "\n" + xmpPreflightError
             );
             return;
-        }
-        if (!cropResponse) return;
-        try {
-            if (!app.documents.length || app.activeDocument.id !== doc.id) {
-                alert(localText(
-                    "処理対象のPhotoshopドキュメントが切り替わったため、中止しました。",
-                    "The target Photoshop document changed, so processing was cancelled."
-                ));
-                return;
-            }
-        } catch (_documentCheckError) { }
-        if (metadataAction === METADATA_ACTION_WRITE) {
-            try {
-                if (!CropIntegration.preflightMetadata(doc, cropResponse)) {
-                    throw new Error(localText("XMP配置情報がありません。", "XMP placement data is unavailable."));
-                }
-            } catch (xmpPreflightError) {
-                alert(
-                    localText(
-                        "XMPタグを準備できないため、画像処理を中止しました。",
-                        "Image processing was cancelled because the XMP tag could not be prepared."
-                    ) + "\n" + xmpPreflightError
-                );
-                return;
-            }
-        } else if (metadataAction === METADATA_ACTION_REMOVE) {
-            try {
-                if (!CropIntegration.preflightMetadataRemoval(doc, cropResponse)) {
-                    throw new Error(localText("対象のXMPタグを確認できませんでした。", "The target XMP tag could not be checked."));
-                }
-            } catch (xmpRemovalPreflightError) {
-                alert(
-                    localText(
-                        "XMPタグの削除を準備できないため、画像処理を中止しました。",
-                        "Image processing was cancelled because XMP tag removal could not be prepared."
-                    ) + "\n" + xmpRemovalPreflightError
-                );
-                return;
-            }
         }
     }
 
     __HISTORY_CTX__ = {
+        photoshopSession: ctx.photoshopSession,
         newWidthPx: newWidthPx,
         newHeightPx: newHeightPx,
         targetPPI: targetPPI,
@@ -898,14 +1066,13 @@ function finalizeInDesignResizeFlow(ctx) {
         upscaleMethod: upscaleMethod,
         downscaleMethod: downscaleMethod,
         trimmingMode: trimmingMode,
-        metadataAction: metadataAction,
         cropResponse: cropResponse
     };
     var historyStateBeforeProcess = null;
     try {
         historyStateBeforeProcess = doc.activeHistoryState;
     } catch (_historySnapshotError) { }
-    var resizeResult = runWithHistory(HISTORY_NAME, "performResizeFromCtx()");
+    var resizeResult = runWithHistory(ctx.photoshopSession, HISTORY_NAME, "performResizeFromCtx()");
     __HISTORY_CTX__ = null;
     if (!resizeResult || resizeResult.ok !== true) {
         var metadataRestoredAfterProcessError = true;
@@ -924,35 +1091,6 @@ function finalizeInDesignResizeFlow(ctx) {
     }
 }
 
-function continueInDesignNameOnlyFlow(ctx) {
-    if (!ctx) return;
-    var fallbackAction = showFallbackLinkConfirmDialog({
-        items: ctx.candidateItemsArray,
-        photoshopFileName: app.activeDocument.name,
-        photoshopPath: ctx.imgPath,
-        hasFolderDifference: ctx.hasFolderDifference,
-        hasExtensionDifference: ctx.hasExtensionDifference
-    });
-    if (fallbackAction === "cancel") return;
-    if (fallbackAction === "use" && ctx.candidateItemsArray.length === 1) {
-        ctx.targetItems = [ctx.defaultTargetItem];
-        ctx.targetItem = ctx.defaultTargetItem;
-    } else {
-        var selectedItem = chooseInDesignItemSync(buildInDesignChooserPayload(ctx.candidateItemsArray, ctx.defaultTargetItem ? ctx.defaultTargetItem.linkIndex : null, {
-            title: localText("処理するリンクを選択", "Select Link to Process"),
-            messageLine1: buildNameOnlyMessageLine1(ctx.hasFolderDifference, ctx.hasExtensionDifference),
-            messageLine2: localText("処理対象にするリンクを選んでください。", "Choose the link to process."),
-            messageLine3: localText("選ぶと該当リンクを中央表示します。", "Selecting one centers the corresponding link."),
-            photoshopPathRaw: ctx.imgPath
-        }));
-        if (!selectedItem) return;
-        ctx.targetItems = [selectedItem];
-        ctx.targetItem = selectedItem;
-    }
-    finalizeInDesignResizeFlow(ctx);
-}
-
-// 日本語向け＋欧文の簡易NFC正規化（結合濁点/半濁点＋欧文合成文字を合成文字へ）
 function toNFCJa(s) {
     if (!s) return s;
     var map = {
@@ -1125,7 +1263,8 @@ function _normPathLocal(p) {
     try {
         var f = new File(p);
         try {
-            f = f.resolve();
+            var resolvedFile = f.resolve();
+            if (resolvedFile) f = resolvedFile;
         } catch (_e) { };
         var s = f.fsName;
         return toNFCJa(s);
@@ -1137,196 +1276,346 @@ function _normPathLocal(p) {
         }
     }
 }
-var NORM_HELPER_SRC = _normPathLocal.toString();
+var NORM_HELPER_SRC_ID = _normPathLocal.toString();
 
-// InDesign側用: NFC処理なしのパス正規化
-function _normPathLocalNoNFC(p) {
-    try {
-        var f = new File(p);
+function getInDesignParentPage(item) {
+    var currentItem = item;
+    for (var parentDepth = 0; currentItem && parentDepth < 8; parentDepth++) {
         try {
-            f = f.resolve();
-        } catch (_e) { };
-        return f.fsName;
-    } catch (e) {
+            var parentPage = currentItem.parentPage;
+            if (parentPage && parentPage.isValid !== false) return parentPage;
+        } catch (_parentPageError) {}
         try {
-            return String(p);
-        } catch (e2) {
-            return String(p);
+            currentItem = currentItem.parent;
+        } catch (_parentItemError) {
+            currentItem = null;
         }
     }
+    return null;
 }
-var NORM_HELPER_SRC_ID = _normPathLocalNoNFC.toString();
+var INDESIGN_PARENT_PAGE_HELPER_SRC = getInDesignParentPage.toString();
 
-function splitSimpleFileNameInfo(fileName) {
-    var value = String(fileName || "");
-    var lastSlashIndex = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
-    if (lastSlashIndex >= 0) {
-        value = value.substring(lastSlashIndex + 1);
+function buildInitialCandidateRowData(item, index) {
+    var order = String(index + 1);
+    if (order.length < 2) order = "0" + order;
+    var pageText = item && item.pageName ? String(item.pageName) : "-";
+    var sizeText = "-";
+    if (item && isFinite(Number(item.placedWmm)) && isFinite(Number(item.placedHmm))) {
+        sizeText = Number(item.placedWmm).toFixed(2) + " × " + Number(item.placedHmm).toFixed(2) + " mm";
     }
-    var dotIndex = value.lastIndexOf(".");
     return {
-        fileName: value,
-        baseName: (dotIndex > 0) ? value.substring(0, dotIndex) : value,
-        extension: (dotIndex > 0) ? value.substring(dotIndex + 1) : ""
+        order: order,
+        page: pageText,
+        size: sizeText
     };
 }
 
+function buildPlacementHandle(candidate) {
+    return {
+        bridgeTarget: candidate.bridgeTarget || "",
+        documentId: candidate.documentId,
+        documentPath: candidate.documentPath || "",
+        linkId: candidate.linkId,
+        itemId: candidate.itemId,
+        frameId: candidate.frameId
+    };
+}
+
+function hasValidPlacementGeometryFingerprint(fingerprint) {
+    if (!fingerprint) return false;
+    var quadNames = ["graphicQuad", "frameQuad"];
+    for (var quadIndex = 0; quadIndex < quadNames.length; quadIndex++) {
+        var quad = fingerprint[quadNames[quadIndex]];
+        if (!(quad instanceof Array) || quad.length !== 4) return false;
+        for (var pointIndex = 0; pointIndex < quad.length; pointIndex++) {
+            var point = quad[pointIndex];
+            if (!(point instanceof Array) || point.length < 2 ||
+                    !isFinite(Number(point[0])) || !isFinite(Number(point[1]))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+function chooseInitialInDesignCandidate(items, initialItem, warningLines, photoshopFileName) {
+    if (!items || !items.length) return null;
+    if (items.length === 1) return items[0];
+
+    var dialog = new Window("dialog", localText("処理する配置を選択", "Select Placement to Process"));
+    dialog.orientation = "column";
+    dialog.alignChildren = ["fill", "top"];
+    dialog.spacing = 8;
+    dialog.margins = 12;
+
+    var columnTitles = [
+        localText("連番", "No."),
+        localText("ページ", "Page"),
+        localText("サイズ", "Size")
+    ];
+    var rowDataList = [];
+    var orderValues = [columnTitles[0]];
+    var pageValues = [columnTitles[1]];
+    var sizeValues = [columnTitles[2]];
+    for (var rowDataIndex = 0; rowDataIndex < items.length; rowDataIndex++) {
+        var rowData = buildInitialCandidateRowData(items[rowDataIndex], rowDataIndex);
+        rowDataList.push(rowData);
+        orderValues.push(rowData.order);
+        pageValues.push(rowData.page);
+        sizeValues.push(rowData.size);
+    }
+
+    function measureColumnWidth(values, minimumWidth) {
+        var width = Number(minimumWidth) || 0;
+        for (var valueIndex = 0; valueIndex < values.length; valueIndex++) {
+            var textValue = String(values[valueIndex] || "");
+            var measuredWidth = textValue.length * 7;
+            try {
+                measuredWidth = Number(dialog.graphics.measureString(textValue)[0]);
+            } catch (_measureError) { }
+            if (isFinite(measuredWidth)) {
+                width = Math.max(width, Math.ceil(measuredWidth) + 24);
+            }
+        }
+        return Math.ceil(width);
+    }
+
+    var columnWidths = [
+        measureColumnWidth(orderValues, 54),
+        measureColumnWidth(pageValues, 100),
+        measureColumnWidth(sizeValues, 180)
+    ];
+    var listWidth = columnWidths[0] + columnWidths[1] + columnWidths[2] + 34;
+    var contentWidth = Math.max(440, listWidth);
+
+    var lines = warningLines || [];
+    for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        var messageLine = dialog.add("statictext", undefined, String(lines[lineIndex] || ""), { multiline: true });
+        messageLine.preferredSize = [contentWidth, 34];
+    }
+    var explanation = dialog.add("statictext", undefined, localText(
+        "ここで選択した同じ配置を、リサイズ・ガイド・切り抜き・XMPに使用します。",
+        "The same selected placement will be used for resizing, guides, cropping, and XMP."
+    ), { multiline: true });
+    explanation.preferredSize = [contentWidth, 34];
+
+    var fileNameText = dialog.add("statictext", undefined,
+        localText("ファイル名：", "File name: ") + String(photoshopFileName || "-"),
+        { multiline: true });
+    fileNameText.preferredSize = [contentWidth, 34];
+
+    var listBox = dialog.add("listbox", undefined, [], {
+        multiselect: false,
+        numberOfColumns: 3,
+        showHeaders: true,
+        columnTitles: columnTitles,
+        columnWidths: columnWidths
+    });
+    var visibleRowCount = Math.max(4, Math.min(8, items.length));
+    listBox.preferredSize = [contentWidth, 28 + visibleRowCount * 22];
+    var initialIndex = 0;
+    for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
+        var row = listBox.add("item", rowDataList[itemIndex].order);
+        row.subItems[0].text = rowDataList[itemIndex].page;
+        row.subItems[1].text = rowDataList[itemIndex].size;
+        row.candidate = items[itemIndex];
+        if (initialItem && Number(items[itemIndex].linkId) === Number(initialItem.linkId) &&
+                Number(items[itemIndex].documentId) === Number(initialItem.documentId) &&
+                String(items[itemIndex].bridgeTarget || "") === String(initialItem.bridgeTarget || "")) {
+            initialIndex = itemIndex;
+        }
+    }
+    listBox.selection = listBox.items[initialIndex];
+    listBox.onChange = function() {
+        if (!this.selection || !this.selection.candidate) return;
+        selectInInDesign(buildPlacementHandle(this.selection.candidate), false);
+    };
+
+    var buttonGroup = dialog.add("group");
+    buttonGroup.alignment = ["right", "center"];
+    var cancelButton = buttonGroup.add("button", undefined, localText("キャンセル", "Cancel"), { name: "cancel" });
+    var showButton = buttonGroup.add("button", undefined, localText("InDesignで表示", "Show in InDesign"));
+    var okButton = buttonGroup.add("button", undefined, "OK", { name: "ok" });
+    dialog.defaultElement = okButton;
+    dialog.cancelElement = cancelButton;
+
+    cancelButton.onClick = function() { dialog.close(0); };
+    okButton.onClick = function() {
+        if (!listBox.selection) {
+            alert(localText("候補を選択してください。", "Select a candidate."));
+            return;
+        }
+        dialog.close(1);
+    };
+    showButton.onClick = function() {
+        if (!listBox.selection) return;
+        if (selectInInDesign(buildPlacementHandle(listBox.selection.candidate), true)) {
+            dialog.close(2);
+        }
+    };
+
+    var result = dialog.show();
+    if (result !== 1 || !listBox.selection) return null;
+    return listBox.selection.candidate;
+}
+
 function main() {
-    // 前提チェック: ドキュメント未オープンなら中止
     if (!app.documents.length) {
         alert(localText("開いているドキュメントがありません。", "No document is open."));
         return;
     }
     var doc = app.activeDocument;
-    var imgPath = "";
-    try {
-        imgPath = _normPathLocal(doc.fullName.fsName); // 送信前に toNFCJa + resolve + fsName で正規化
-    } catch (pathError) {
-        alert(localText("保存されていないドキュメントでは実行できません。保存してから実行してください。", "This script cannot run on an unsaved document. Save the document and run it again."));
+    var isSaved = false;
+    try { isSaved = doc.saved === true; } catch (_savedStateError) {}
+    if (!isSaved) {
+        alert(localText(
+            "未保存の変更があるドキュメントでは実行できません。保存し、InDesignのリンクを更新してから実行してください。",
+            "This script cannot run while the document has unsaved changes. Save it, update the link in InDesign, and run the script again."
+        ));
         return;
     }
-    var docWidthPx = doc.width.as("px");
-    var docHeightPx = doc.height.as("px");
-    var currentPPI = doc.resolution;
 
+    var photoshopSession = null;
+    try {
+        photoshopSession = createPhotoshopDocumentSession(doc);
+    } catch (documentSessionError) {
+        alert(documentSessionError);
+        return;
+    }
+    if (!photoshopSession.documentPath) {
+        alert(localText(
+            "ドキュメントの保存先を取得できません。保存してから実行してください。",
+            "The document path could not be obtained. Save the document and run the script again."
+        ));
+        return;
+    }
+
+    var imgPath = photoshopSession.documentPath;
+    var docWidthPx = photoshopSession.initialWidthPx;
+    var docHeightPx = photoshopSession.initialHeightPx;
+    var currentPPI = photoshopSession.initialResolution;
     var idSideSrc = inDesignSide.toString()
         .replace("/*__INJECT_HELPERS__*/",
+            "var toNFCJa = " + NFC_HELPER_SRC + ";\n" +
             "var _normPath = " + NORM_HELPER_SRC_ID + ";\n" +
-            "var _matchLinkPath = " + MATCH_LINK_HELPER_SRC + ";\n" +
+            "var getInDesignParentPage = " + INDESIGN_PARENT_PAGE_HELPER_SRC + ";\n" +
             "var _decodeAndNormalizePath = " + DECODE_NORM_HELPER_SRC + ";\n" +
-            "var _decodePathRaw = " + DECODE_RAW_HELPER_SRC + ";");
-    var btBody = "(" + idSideSrc + ")(" + toSourceLiteral({
-        pathFs: encodeURI(imgPath),
-        fileName: String(doc.name || "")
-    }) + ");"; // InDesign側関数を文字列化し、エンコード済みパスを引数に即時実行
-    var btResult = sendBridgeTalkAndWait("indesign", btBody, 30000);
-    if (!btResult.ok) {
-        alert(localText("InDesign通信エラー: ", "InDesign communication error: ") + btResult.error);
+            "var _decodePathRaw = " + DECODE_RAW_HELPER_SRC + ";\n" +
+            "var remoteLocaleCode = " + toSourceLiteral(currentLocaleCode()) + ";\n" +
+            "function remoteText(jaText, enText) { return remoteLocaleCode === 'en' ? enText : jaText; }");
+
+    var initialResult = requestInitialInDesignCandidates(idSideSrc, imgPath, doc.name);
+    if (!initialResult.ok) {
+        alert(localText("InDesign通信エラー: ", "InDesign communication error: ") + initialResult.error);
         return;
     }
-
-    var data = btResult.body;
-    if (!data || data == "null") {
+    var obj = initialResult.value;
+    if (!obj || !obj.items || !obj.items.length) {
         alert(localText("InDesignで該当リンク画像が見つかりません。", "The matching linked image was not found in InDesign."));
         return;
     }
-    var obj = parseBridgeTalkJson(data, data, "InDesign");
-    if (!obj) return;
-    var matchedItems = (obj && obj.items && obj.items.length) ? obj.items : null;
-    if (!matchedItems) {
-        matchedItems = [{
-            hScale: obj.hScale,
-            vScale: obj.vScale,
-            linkStatus: obj.linkStatus,
-            linkIndex: obj.linkIndex
-        }];
-    }
-    var matchType = (obj && obj.matchType) ? String(obj.matchType) : "exact";
-    var hasFolderDifference = !!(obj && obj.hasFolderDifference);
-    var hasExtensionDifference = !!(obj && obj.hasExtensionDifference);
-    if (matchType === "nameOnly") {
-        var targetNameInfo = splitSimpleFileNameInfo(doc.name);
-        var normalizedDocPath = String(imgPath || "").replace(/[\/\\¥￥＼]+/g, "/");
-        var lastDocSlash = normalizedDocPath.lastIndexOf("/");
-        var docFolder = (lastDocSlash >= 0) ? normalizedDocPath.substring(0, lastDocSlash) : "";
-        var filteredItems = [];
-        for (var matchedIndex = 0; matchedIndex < matchedItems.length; matchedIndex++) {
-            var candidateItem = matchedItems[matchedIndex] || {};
-            var candidateNameInfo = splitSimpleFileNameInfo(candidateItem.rawFileName || candidateItem.fileName || "");
-            if (!targetNameInfo.baseName || !candidateNameInfo.baseName) continue;
-            if (targetNameInfo.baseName !== candidateNameInfo.baseName) continue;
-            filteredItems.push(candidateItem);
-        }
-        matchedItems = filteredItems;
-        if (!matchedItems.length) {
-            alert(localText("同名のリンク候補を特定できませんでした。", "Could not identify the same-name link candidate."));
-            return;
-        }
-        hasFolderDifference = false;
-        hasExtensionDifference = false;
-        for (var filteredIndex = 0; filteredIndex < matchedItems.length; filteredIndex++) {
-            var filteredItem = matchedItems[filteredIndex] || {};
-            var filteredNameInfo = splitSimpleFileNameInfo(filteredItem.rawFileName || filteredItem.fileName || "");
-            var filteredPath = String(filteredItem.rawFilePath || filteredItem.filePath || "");
-            var normalizedFilteredPath = filteredPath.replace(/[\/\\¥￥＼]+/g, "/");
-            var lastFilteredSlash = normalizedFilteredPath.lastIndexOf("/");
-            var filteredFolder = (lastFilteredSlash >= 0) ? normalizedFilteredPath.substring(0, lastFilteredSlash) : "";
-            if (filteredFolder !== docFolder) hasFolderDifference = true;
-            if (filteredNameInfo.extension !== targetNameInfo.extension) hasExtensionDifference = true;
-        }
-    }
+
+    var matchedItems = obj.items;
+    var matchType = String(obj.matchType || "exact");
+    var hasFolderDifference = !!obj.hasFolderDifference;
+    var hasExtensionDifference = !!obj.hasExtensionDifference;
 
     var longPx = Math.max(docWidthPx, docHeightPx);
-
     for (var itemIndex = 0; itemIndex < matchedItems.length; itemIndex++) {
         var item = matchedItems[itemIndex];
-        var itemHScale = Math.abs(Number(item.hScale));
-        var itemVScale = Math.abs(Number(item.vScale));
-        var itemPlacedWmm = docWidthPx * (itemHScale / 100) / currentPPI * 25.4;
-        var itemPlacedHmm = docHeightPx * (itemVScale / 100) / currentPPI * 25.4;
-        var itemLongMM = Math.max(itemPlacedWmm, itemPlacedHmm);
-        item.hScale = itemHScale;
-        item.vScale = itemVScale;
+        var itemPlacedWmm = Number(item.placedWmm);
+        var itemPlacedHmm = Number(item.placedHmm);
+        if (!isFinite(itemPlacedWmm) || !isFinite(itemPlacedHmm) ||
+                itemPlacedWmm <= 0 || itemPlacedHmm <= 0) {
+            alert(localText(
+                "InDesignから配置画像の実寸を取得できませんでした。",
+                "The placed image dimensions could not be obtained from InDesign."
+            ));
+            return;
+        }
+        if (!hasValidPlacementGeometryFingerprint(item.geometryFingerprint)) {
+            alert(localText(
+                "InDesignから配置画像とフレームの位置・変形情報を取得できませんでした。",
+                "The placed graphic and frame geometry could not be obtained from InDesign."
+            ));
+            return;
+        }
+        item.hScale = Math.abs(Number(item.hScale));
+        item.vScale = Math.abs(Number(item.vScale));
         item.placedWmm = itemPlacedWmm;
         item.placedHmm = itemPlacedHmm;
-        item.placedLongMM = itemLongMM;
+        item.placedLongMM = Math.max(itemPlacedWmm, itemPlacedHmm);
         item.effectivePPI = Math.min(
             docWidthPx * 25.4 / itemPlacedWmm,
             docHeightPx * 25.4 / itemPlacedHmm
         );
+        item.matchType = matchType;
+        item.hasFolderDifference = hasFolderDifference;
+        item.hasExtensionDifference = hasExtensionDifference;
     }
 
     var candidateItemsArray = matchedItems;
-    var candidateSizeInfo = findInDesignMinMaxIndices(candidateItemsArray);
-    var defaultTargetItem = candidateItemsArray[candidateSizeInfo.maxIndex];
-    var flowCtx = {
+    var defaultTargetItem = candidateItemsArray[findLargestInDesignCandidateIndex(candidateItemsArray)];
+    var selectedTargetItem = defaultTargetItem;
+
+    if (matchType === "nameOnly" && candidateItemsArray.length === 1) {
+        var fallbackAction = showFallbackLinkConfirmDialog({
+            items: candidateItemsArray,
+            photoshopFileName: doc.name,
+            photoshopPath: imgPath,
+            hasFolderDifference: hasFolderDifference,
+            hasExtensionDifference: hasExtensionDifference
+        });
+        if (fallbackAction === "check") {
+            selectInInDesign(buildPlacementHandle(selectedTargetItem), true);
+            return;
+        }
+        if (fallbackAction !== "use") return;
+    } else if (candidateItemsArray.length > 1) {
+        var candidateWarnings = [];
+        if (matchType === "nameOnly") {
+            candidateWarnings.push(buildNameOnlyMessageLine1(hasFolderDifference, hasExtensionDifference));
+            candidateWarnings.push(localText(
+                "同名候補から処理対象を一件選択してください。",
+                "Select one placement from the same-name candidates."
+            ));
+        } else {
+            candidateWarnings.push(localText(
+                "同じ画像が複数のInDesign配置で見つかりました。",
+                "The same image was found in multiple InDesign placements."
+            ));
+        }
+        selectedTargetItem = chooseInitialInDesignCandidate(candidateItemsArray, defaultTargetItem, candidateWarnings, doc.name);
+        if (!selectedTargetItem) return;
+    }
+
+    if (selectedTargetItem.linkStatus === 1) {
+        alert(localText("リンク切れ画像です。", "The linked image is missing."));
+        return;
+    }
+    if (selectedTargetItem.linkStatus === 2) {
+        alert(localText("リンクが更新されていません。", "The link is not updated."));
+        return;
+    }
+
+    finalizeInDesignResizeFlow({
+        photoshopSession: photoshopSession,
         docWidthPx: docWidthPx,
         docHeightPx: docHeightPx,
         currentPPI: currentPPI,
         longPx: longPx,
         imgPath: imgPath,
         candidateItemsArray: candidateItemsArray,
-        defaultTargetItem: defaultTargetItem,
-        targetItems: candidateItemsArray,
-        targetItem: defaultTargetItem,
-        matchType: matchType,
-        hasFolderDifference: hasFolderDifference,
-        hasExtensionDifference: hasExtensionDifference
-    };
-
-    if (matchType !== "nameOnly") {
-        for (var linkIndex = 0; linkIndex < candidateItemsArray.length; linkIndex++) {
-            var linkStatus = candidateItemsArray[linkIndex].linkStatus;
-            if (linkStatus === 1) {
-                alert(localText("リンク切れ画像です。", "The linked image is missing."));
-                return;
-            } else if (linkStatus === 2) {
-                alert(localText("リンクが更新されていません。", "The link is not updated."));
-                return;
-            }
-        }
-    }
-
-    if (matchType === "nameOnly") {
-        continueInDesignNameOnlyFlow(flowCtx);
-        return;
-    }
-
-    finalizeInDesignResizeFlow(flowCtx);
+        targetItem: selectedTargetItem,
+        matchedItemCount: candidateItemsArray.length,
+        matchType: matchType
+    });
 }
-
-// InDesign側で使用する共通関数: リンクパス一致判定
-// この関数は文字列化されてInDesign側に送られる
-function _matchLinkPath(linkFilePath, rawTargetPath, targetNorm) {
-    if (String(linkFilePath || "") === String(rawTargetPath || "")) return true;
-    var lnkNorm = _normPath(linkFilePath);
-    return (lnkNorm === targetNorm);
-}
-var MATCH_LINK_HELPER_SRC = _matchLinkPath.toString();
 
 // InDesign側で使用する共通関数: パスのデコードと正規化
 function _decodeAndNormalizePath(encodedPath) {
-    var decoded = decodeURI(encodedPath);
+    var decoded = decodeURIComponent(encodedPath);
+    decoded = toNFCJa(decoded);
     try {
         decoded = _normPath(decoded);
     } catch (_e) { }
@@ -1336,8 +1625,8 @@ var DECODE_NORM_HELPER_SRC = _decodeAndNormalizePath.toString();
 
 // InDesign側で使用する共通関数: パスのデコード（正規化なし）
 function _decodePathRaw(encodedPath) {
-    var decoded = decodeURI(encodedPath);
-    return decoded;
+    var decoded = decodeURIComponent(encodedPath);
+    return toNFCJa(decoded);
 }
 var DECODE_RAW_HELPER_SRC = _decodePathRaw.toString();
 
@@ -1511,9 +1800,108 @@ function inDesignSide(targetInfo) {
         };
     }
 
+    function getObjectId(item) {
+        try { return Number(item.id); } catch (_idError) {}
+        return null;
+    }
+
+    function getFrameItemId(graphicItem) {
+        try { return getObjectId(graphicItem.parent); } catch (_frameIdError) {}
+        return null;
+    }
+
+    function getPageName(graphicItem) {
+        var parentPage = getInDesignParentPage(graphicItem);
+        if (parentPage) {
+            try {
+                var pageName = String(parentPage.name || "");
+                if (pageName) return pageName;
+            } catch (_pageNameError) {}
+        }
+        return remoteText("ペーストボード", "Pasteboard");
+    }
+
+    function getDocumentPath(document) {
+        try {
+            return String(document.fullName.fsName || document.fullName || "");
+        } catch (_documentPathError) {}
+        return "";
+    }
+
+    function buildDocumentInfo(document) {
+        return {
+            documentId: getObjectId(document),
+            documentName: String(document.name || ""),
+            documentPath: getDocumentPath(document),
+            applicationVersion: String(app.version || "")
+        };
+    }
+
+    function resolveSpreadPoint(item, anchorPoint) {
+        var resolved = item.resolve(anchorPoint, CoordinateSpaces.SPREAD_COORDINATES);
+        var point = resolved && resolved.length ? resolved[0] : null;
+        if (!point || point.length < 2) {
+            throw new Error(remoteText(
+                "配置画像の座標を取得できませんでした。",
+                "Could not resolve the placed image coordinates."
+            ));
+        }
+        return [Number(point[0]), Number(point[1])];
+    }
+
+    function pointDistance(a, b) {
+        var dx = Number(b[0]) - Number(a[0]);
+        var dy = Number(b[1]) - Number(a[1]);
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function getPlacedImageSizeMM(graphicItem) {
+        try {
+            var topLeft = resolveSpreadPoint(graphicItem, AnchorPoint.TOP_LEFT_ANCHOR);
+            var topRight = resolveSpreadPoint(graphicItem, AnchorPoint.TOP_RIGHT_ANCHOR);
+            var bottomLeft = resolveSpreadPoint(graphicItem, AnchorPoint.BOTTOM_LEFT_ANCHOR);
+            return {
+                width: pointDistance(topLeft, topRight) * 25.4 / 72,
+                height: pointDistance(topLeft, bottomLeft) * 25.4 / 72
+            };
+        } catch (_placedSizeError) {
+            return { width: 0, height: 0 };
+        }
+    }
+
+    function getPlacementGeometryFingerprint(graphicItem) {
+        var frameItem = graphicItem;
+        try {
+            if (graphicItem.parent && graphicItem.parent.allGraphics !== undefined) {
+                frameItem = graphicItem.parent;
+            }
+        } catch (_frameFingerprintError) {}
+
+        function getQuad(item) {
+            return [
+                resolveSpreadPoint(item, AnchorPoint.TOP_LEFT_ANCHOR),
+                resolveSpreadPoint(item, AnchorPoint.TOP_RIGHT_ANCHOR),
+                resolveSpreadPoint(item, AnchorPoint.BOTTOM_RIGHT_ANCHOR),
+                resolveSpreadPoint(item, AnchorPoint.BOTTOM_LEFT_ANCHOR)
+            ];
+        }
+
+        try {
+            return {
+                graphicQuad: getQuad(graphicItem),
+                frameQuad: getQuad(frameItem)
+            };
+        } catch (_fingerprintError) {
+            return null;
+        }
+    }
+
     function buildItemObject(entry, hScale, vScale, pathInfo, displayPathInfo, resolvedPath) {
         var displayFileName = (displayPathInfo && displayPathInfo.fileName) ? displayPathInfo.fileName : pathInfo.fileName;
         var displayFolderPath = (displayPathInfo && displayPathInfo.folderPath) ? displayPathInfo.folderPath : pathInfo.folderPath;
+        var documentInfo = buildDocumentInfo(entry.document);
+        var placedSize = getPlacedImageSizeMM(entry.link.parent);
+        var geometryFingerprint = getPlacementGeometryFingerprint(entry.link.parent);
         var linkStatus = entry.status;
         if (linkStatus == null) {
             linkStatus = getLinkStatusCode(entry.link);
@@ -1522,7 +1910,18 @@ function inDesignSide(targetInfo) {
         return {
             hScale: hScale,
             vScale: vScale,
+            placedWmm: placedSize.width,
+            placedHmm: placedSize.height,
             linkStatus: linkStatus,
+            linkId: getObjectId(entry.link),
+            itemId: getObjectId(entry.link.parent),
+            frameId: getFrameItemId(entry.link.parent),
+            documentId: documentInfo.documentId,
+            documentName: documentInfo.documentName,
+            documentPath: documentInfo.documentPath,
+            applicationVersion: documentInfo.applicationVersion,
+            pageName: getPageName(entry.link.parent),
+            geometryFingerprint: geometryFingerprint,
             linkIndex: entry.linkIndex,
             fileName: displayFileName,
             folderPath: displayFolderPath,
@@ -1534,10 +1933,11 @@ function inDesignSide(targetInfo) {
         };
     }
 
-    function buildLinkEntry(linkIndex, link) {
+    function buildLinkEntry(document, linkIndex, link) {
         var rawFilePath = String(link.filePath || "");
         var rawFileName = String(link.name || "");
         return {
+            document: document,
             link: link,
             linkIndex: linkIndex,
             status: null,
@@ -1583,512 +1983,216 @@ function inDesignSide(targetInfo) {
         );
     }
 
-    var doc = app.activeDocument;
-    var links = doc.links;
     var targetRawPathInfo = buildNameOnlyPathInfo(decodedRaw, decodedRaw);
     var targetFileNameInfo = splitFileNameInfo(targetInfo && targetInfo.fileName ? String(targetInfo.fileName) : targetRawPathInfo.fileName);
     var targetPathInfo = buildNameOnlyPathInfo(decodedNorm, decodedRaw);
-    var exactEntries = [];
-    var linkEntries = [];
+    var exactItems = [];
+    var nameOnlyItems = [];
     var hasFolderDifference = false;
     var hasExtensionDifference = false;
-    for (var i = 0; i < links.length; i++) {
-        var entry = buildLinkEntry(i, links[i]);
-        if (entry.rawFilePath === decodedRaw) {
-            exactEntries.push(entry);
-            continue;
+    for (var documentIndex = 0; documentIndex < app.documents.length; documentIndex++) {
+        var doc = app.documents[documentIndex];
+        var links = doc.links;
+        var exactEntries = [];
+        var linkEntries = [];
+        for (var linkIndex = 0; linkIndex < links.length; linkIndex++) {
+            var entry = buildLinkEntry(doc, linkIndex, links[linkIndex]);
+            if (entry.rawFilePath === decodedRaw) {
+                exactEntries.push(entry);
+                continue;
+            }
+            linkEntries.push(entry);
         }
-        linkEntries.push(entry);
-    }
-    if (exactEntries.length) {
-        var exactItems = [];
-        for (var exactIndex = 0; exactIndex < exactEntries.length; exactIndex++) {
-            exactItems.push(buildResolvedItem(exactEntries[exactIndex], getEntryRawPathInfo(exactEntries[exactIndex]), exactEntries[exactIndex].rawFilePath));
+        for (var rawExactIndex = 0; rawExactIndex < exactEntries.length; rawExactIndex++) {
+            var rawExactEntry = exactEntries[rawExactIndex];
+            exactItems.push(buildResolvedItem(rawExactEntry, getEntryRawPathInfo(rawExactEntry), rawExactEntry.rawFilePath));
         }
-        return ({
-            matchType: "exact",
-            hasFolderDifference: false,
-            hasExtensionDifference: false,
-            items: exactItems
-        }).toSource();
-    }
-    var nameOnlyItems = [];
-    var candidateEntries = [];
-    if (targetFileNameInfo.baseName) {
-        for (var rawIndex = 0; rawIndex < linkEntries.length; rawIndex++) {
-            var fileNameInfo = linkEntries[rawIndex].fileNameInfo;
-            if (fileNameInfo.baseName && fileNameInfo.baseName === targetFileNameInfo.baseName) {
-                candidateEntries.push(linkEntries[rawIndex]);
+        var candidateEntries = [];
+        if (targetFileNameInfo.baseName) {
+            for (var rawIndex = 0; rawIndex < linkEntries.length; rawIndex++) {
+                var fileNameInfo = linkEntries[rawIndex].fileNameInfo;
+                if (fileNameInfo.baseName && fileNameInfo.baseName === targetFileNameInfo.baseName) {
+                    candidateEntries.push(linkEntries[rawIndex]);
+                }
             }
         }
-    }
-    var normalizedExactEntries = [];
-    for (var normalizedExactIndex = 0; normalizedExactIndex < candidateEntries.length; normalizedExactIndex++) {
-        var exactCandidateEntry = candidateEntries[normalizedExactIndex];
-        if (exactCandidateEntry.rawFilePath === decodedRaw || getEntryNormalizedPath(exactCandidateEntry) === decodedNorm) {
-            normalizedExactEntries.push(exactCandidateEntry);
+        for (var candidateIndex = 0; candidateIndex < candidateEntries.length; candidateIndex++) {
+            var candidateEntry = candidateEntries[candidateIndex];
+            var normalizedLinkPath = getEntryNormalizedPath(candidateEntry);
+            var pathInfo = getEntryNormalizedPathInfo(candidateEntry);
+            if (normalizedLinkPath === decodedNorm) {
+                exactItems.push(buildResolvedItem(candidateEntry, pathInfo, normalizedLinkPath));
+                continue;
+            }
+            if (!targetFileNameInfo.baseName || !candidateEntry.fileNameInfo.baseName) continue;
+            if (targetFileNameInfo.baseName !== candidateEntry.fileNameInfo.baseName) continue;
+            if (targetPathInfo.folderPath !== pathInfo.folderPath) hasFolderDifference = true;
+            if (targetFileNameInfo.extension !== candidateEntry.fileNameInfo.extension) hasExtensionDifference = true;
+            nameOnlyItems.push(buildResolvedItem(candidateEntry, pathInfo, normalizedLinkPath));
         }
     }
-    if (normalizedExactEntries.length) {
-        var normalizedExactItems = [];
-        for (var normalizedItemIndex = 0; normalizedItemIndex < normalizedExactEntries.length; normalizedItemIndex++) {
-            var normalizedEntry = normalizedExactEntries[normalizedItemIndex];
-            normalizedExactItems.push(buildResolvedItem(normalizedEntry, getEntryNormalizedPathInfo(normalizedEntry), getEntryNormalizedPath(normalizedEntry)));
-        }
+    if (exactItems.length) {
         return ({
             matchType: "exact",
             hasFolderDifference: false,
             hasExtensionDifference: false,
-            items: normalizedExactItems
+            documentInfo: { applicationVersion: String(app.version || "") },
+            items: exactItems
         }).toSource();
-    }
-    for (var candidateIndex = 0; candidateIndex < candidateEntries.length; candidateIndex++) {
-        var candidateEntry = candidateEntries[candidateIndex];
-        var normalizedLinkPath = getEntryNormalizedPath(candidateEntry);
-        var pathInfo = getEntryNormalizedPathInfo(candidateEntry);
-        if (!targetFileNameInfo.baseName || !candidateEntry.fileNameInfo.baseName) continue;
-        if (targetFileNameInfo.baseName !== candidateEntry.fileNameInfo.baseName) continue;
-        if (targetPathInfo.folderPath !== pathInfo.folderPath) hasFolderDifference = true;
-        if (targetFileNameInfo.extension !== candidateEntry.fileNameInfo.extension) hasExtensionDifference = true;
-        nameOnlyItems.push(buildResolvedItem(candidateEntry, pathInfo, normalizedLinkPath));
     }
     if (nameOnlyItems.length) {
         return ({
             matchType: "nameOnly",
             hasFolderDifference: hasFolderDifference,
             hasExtensionDifference: hasExtensionDifference,
+            documentInfo: { applicationVersion: String(app.version || "") },
             items: nameOnlyItems
         }).toSource();
     }
     return null; // 一致するリンクなし
 }
 
-// InDesign側: リンクを選択・表示する関数（InDesignで表示ボタン用）
+// InDesign側: リンクを選択・表示する関数（配置候補の即時プレビュー用）
 function showInInDesignSide(handle) {
     /*__INJECT_HELPERS__*/
-    var encodedPath = handle && handle.pathFs ? String(handle.pathFs) : "";
-    var decodedRaw = _decodePathRaw(encodedPath); // 生文字列（NFCのみ）
-    var decodedNorm = _decodeAndNormalizePath(encodedPath); // 正規化済み
-    if (app.documents.length === 0) throw new Error('InDesign: ドキュメントが開かれていません');
-    var doc = app.activeDocument;
+    if (app.documents.length === 0) {
+        throw new Error("InDesign: " + remoteText("ドキュメントが開かれていません。", "No document is open."));
+    }
+    var doc = null;
+    var requestedDocumentId = Number(handle && handle.documentId);
+    if (isFinite(requestedDocumentId)) {
+        try {
+            doc = app.documents.itemByID(requestedDocumentId);
+            if (!doc || doc.isValid === false) doc = null;
+        } catch (_documentByIdError) { doc = null; }
+    }
+    if (!doc) {
+        throw new Error("InDesign: " + remoteText("対象ドキュメントが見つかりません。", "The target document could not be found."));
+    }
+    if (handle && handle.documentPath) {
+        var currentDocumentPath = "";
+        try { currentDocumentPath = String(doc.fullName.fsName || doc.fullName || ""); } catch (_documentPathError) {}
+        if (_normPath(currentDocumentPath) !== _normPath(String(handle.documentPath))) {
+            throw new Error("InDesign: " + remoteText("対象ドキュメントが変更されています。", "The target document has changed."));
+        }
+    }
     var links = doc.links;
     var bestItem = null;
-    var bestScale = -1;
-    var directLinkIndex = Number(handle && handle.linkIndex);
-    if (isFinite(directLinkIndex) && directLinkIndex >= 0 && directLinkIndex < links.length) {
+    var requestedLinkId = Number(handle && handle.linkId);
+    if (isFinite(requestedLinkId)) {
         try {
-            bestItem = links[Math.floor(directLinkIndex)].parent;
-        } catch (_directLinkError) {
-            bestItem = null;
+            var requestedLink = links.itemByID(requestedLinkId);
+            if (requestedLink && requestedLink.isValid !== false) bestItem = requestedLink.parent;
+        } catch (_linkByIdError) { bestItem = null; }
+    }
+    if (!bestItem) {
+        throw new Error("InDesign: " + remoteText("対象リンクが見つかりません。", "The target link could not be found."));
+    }
+    if (handle && handle.itemId != null && Number(bestItem.id) !== Number(handle.itemId)) {
+        throw new Error("InDesign: " + remoteText("対象配置画像が変更されています。", "The target placed graphic has changed."));
+    }
+    if (handle && handle.frameId != null && Number(bestItem.parent.id) !== Number(handle.frameId)) {
+        throw new Error("InDesign: " + remoteText("対象配置フレームが変更されています。", "The target placement frame has changed."));
+    }
+    var win = null;
+    var previewItem = bestItem;
+    try {
+        if (bestItem.parent && bestItem.parent.isValid !== false) {
+            previewItem = bestItem.parent;
         }
-    }
-    for (var i = 0; i < links.length; i++) {
-        if (bestItem) break;
-        var lk = links[i];
-        var matched = _matchLinkPath(lk.filePath, decodedRaw, decodedNorm);
-        if (matched) {
-            if (lk.status != LinkStatus.NORMAL) continue;
-            var it = lk.parent;
-            var h = 0;
-            var v = 0;
-            try {
-                h = it.horizontalScale;
-                v = it.verticalScale;
-            } catch (_scaleError) {
-                h = 0;
-                v = 0;
-            }
-            var scale = Math.max(h, v);
-            if (scale > bestScale) {
-                bestScale = scale;
-                bestItem = it;
+    } catch (_previewItemError) { previewItem = bestItem; }
+    try {
+        if (doc.layoutWindows.length > 0) {
+            win = doc.layoutWindows[0];
+        }
+    } catch (_windowError) { win = null; }
+    try {
+        if (win) win.bringToFront();
+    } catch (_bringWindowError) { }
+    try {
+        var previewPage = getInDesignParentPage(previewItem);
+        if (previewPage && win) win.activePage = previewPage;
+    } catch (_pageError) { }
+    previewItem.select();
+    try {
+        if (win) {
+            if (!fitSelection(win)) {
+                try {
+                    win.zoom(ZoomOptions.FIT_PAGE);
+                } catch (_fitPageError) { }
             }
         }
-    }
-    if (bestItem) {
-        var win = null;
-        try {
-            if (doc.layoutWindows.length > 0) {
-                win = doc.layoutWindows[0];
-            }
-            if (bestItem.parentPage && win) {
-                win.activePage = bestItem.parentPage;
-            }
-        } catch (_pageError) { }
-        bestItem.select();
-        try {
-            if (win) {
-                if (!fitSelection(win)) {
-                    try {
-                        win.zoom(ZoomOptions.FIT_PAGE);
-                    } catch (_fitPageError) { }
-                }
-            }
-        } catch (_z) { }
-        return;
-    }
-    throw new Error('InDesign: リンクが見つかりません: ' + decodedRaw);
+    } catch (_z) { }
+    return;
 
     function fitSelection(win) {
+        var didFit = false;
         try {
             var fitSelectionAction = app.menuActions.itemByName("$ID/Fit Selection in Window");
             if (fitSelectionAction && fitSelectionAction.isValid) {
                 fitSelectionAction.invoke();
-                return true;
+                didFit = true;
             }
         } catch (_menuError) { }
 
-        try {
-            win.zoom(ZoomOptions.FIT_SPREAD);
-            return true;
-        } catch (_spreadError) { }
+        if (!didFit) {
+            try {
+                win.zoom(ZoomOptions.FIT_SPREAD);
+                didFit = true;
+            } catch (_spreadError) { }
+        }
 
-        return false;
-    }
-}
-
-function chooseInInDesignSide(payload) {
-    if (app.documents.length === 0) return "null";
-    var doc = app.activeDocument;
-    var items = (payload && payload.items && payload.items.length) ? payload.items : null;
-    if (!items) return "null";
-    var isWindows = $.os.indexOf("Windows") >= 0;
-    try {
-        BridgeTalk.bringToFront("indesign");
-    } catch (error) {}
-    try {
-        app.bringToFront();
-    } catch (error) {}
-
-    function decodeDisplayText(text) {
-        var value = String(text || "");
-        try {
-            value = decodeURI(value);
-        } catch (error) {}
-        return value;
-    }
-
-    function normalizeDisplaySlashesLocal(text, separator) {
-        var value = String(text || "");
-        var normalized = "";
-        var lastWasSeparator = false;
-        var slashChar = separator || "/";
-        for (var i = 0; i < value.length; i++) {
-            var ch = value.charAt(i);
-            var isSeparator = (ch === "/") || (ch === "\\") || (ch === "¥") || (ch === "￥") || (ch === "＼");
-            if (isSeparator) {
-                if (!lastWasSeparator) {
-                    normalized += slashChar;
-                    lastWasSeparator = true;
+        if (didFit) {
+            try {
+                var maxPreviewZoom = 200;
+                var currentZoom = Number(win.zoomPercentage);
+                if (isFinite(currentZoom) && currentZoom > maxPreviewZoom) {
+                    win.zoomPercentage = maxPreviewZoom;
                 }
-            } else {
-                normalized += ch;
-                lastWasSeparator = false;
-            }
+            } catch (_zoomLimitError) { }
         }
-        return normalized;
-    }
 
-    function normalizeWindowsDisplayPath(text) {
-        var value = decodeDisplayText(text);
-        if (!isWindows) return value;
-        return normalizeDisplaySlashesLocal(value, "/");
+        return didFit;
     }
+}
 
-    function buildDisplayInfoFromRawPath(rawPath, rawFileName) {
-        var trailingSeparatorPattern = new RegExp("/+$", "g");
-        var filePathText = normalizeWindowsDisplayPath(rawPath);
-        var fileNameText = decodeDisplayText(rawFileName);
-        if (isWindows) {
-            fileNameText = normalizeDisplaySlashesLocal(fileNameText, "/");
-            if (fileNameText.indexOf("/") >= 0) {
-                fileNameText = fileNameText.substring(fileNameText.lastIndexOf("/") + 1);
-            }
-        }
-        if (filePathText && fileNameText) {
-            var comparePath = filePathText.toLowerCase();
-            var compareFileName = fileNameText.toLowerCase();
-            if (comparePath.length >= compareFileName.length &&
-                comparePath.substring(comparePath.length - compareFileName.length) === compareFileName) {
-                return {
-                    fileName: isWindows ? fileNameText.split("/").join("\\") : fileNameText,
-                    folderPath: (isWindows ? filePathText.substring(0, filePathText.length - fileNameText.length).replace(trailingSeparatorPattern, "").split("/").join("\\") : filePathText.substring(0, filePathText.length - fileNameText.length).replace(trailingSeparatorPattern, ""))
-                };
-            }
-        }
-        var slashIndex = filePathText.lastIndexOf("/");
-        return {
-            fileName: isWindows
-                ? (fileNameText || ((slashIndex >= 0) ? filePathText.substring(slashIndex + 1) : filePathText)).split("/").join("\\")
-                : (fileNameText || ((slashIndex >= 0) ? filePathText.substring(slashIndex + 1) : filePathText)),
-            folderPath: isWindows
-                ? ((slashIndex >= 0) ? filePathText.substring(0, slashIndex) : "").split("/").join("\\")
-                : ((slashIndex >= 0) ? filePathText.substring(0, slashIndex) : "")
-        };
-    }
-
-    function getCandidateDisplayInfo(candidate, index) {
-        if (candidate && candidate.rawFilePath) {
-            return buildDisplayInfoFromRawPath(candidate.rawFilePath, candidate.rawFileName);
-        }
-        return {
-            fileName: candidate && candidate.displayFileName ? decodeDisplayText(candidate.displayFileName) : (candidate && candidate.fileName ? decodeDisplayText(candidate.fileName) : (remoteText("リンク ", "Link ") + (index + 1))),
-            folderPath: candidate && candidate.displayFolderPath ? decodeDisplayText(candidate.displayFolderPath) : (candidate && candidate.folderPath ? decodeDisplayText(candidate.folderPath) : remoteText("(不明)", "(Unknown)"))
-        };
-    }
-
-    function getPhotoshopDisplayPath() {
-        var photoshopPathText = normalizeWindowsDisplayPath((payload && payload.photoshopPathRaw) ? payload.photoshopPathRaw : "");
-        return isWindows ? photoshopPathText.split("/").join("\\") : photoshopPathText;
-    }
-
-    function fitSelection(win) {
-        try {
-            var fitSelectionAction = app.menuActions.itemByName("$ID/Fit Selection in Window");
-            if (fitSelectionAction && fitSelectionAction.isValid) {
-                fitSelectionAction.invoke();
-                return true;
-            }
-        } catch (_menuError) {}
-        try {
-            win.zoom(ZoomOptions.FIT_SPREAD);
-            return true;
-        } catch (_spreadError) {}
+function selectInInDesign(handle, bringApplicationToFront) {
+    var bridgeTarget = handle && handle.bridgeTarget ? String(handle.bridgeTarget) : "";
+    if (!bridgeTarget) {
+        alert(localText("対象のInDesignを確認できません。", "The target InDesign application could not be verified."));
         return false;
     }
-
-    function findLink(candidate) {
-        var linkIndex = Number(candidate ? candidate.linkIndex : NaN);
-        if (!isFinite(linkIndex)) return null;
-        linkIndex = Math.floor(linkIndex);
-        if (linkIndex < 0 || linkIndex >= doc.links.length) return null;
-        try {
-            return doc.links[linkIndex];
-        } catch (error) {
-            return null;
-        }
-    }
-
-    function focusCandidate(candidate) {
-        var link = findLink(candidate);
-        if (!link) return;
-        var item = null;
-        try {
-            item = link.parent;
-        } catch (error) {
-            item = null;
-        }
-        if (!item) return;
-        var win = null;
-        try {
-            if (doc.layoutWindows.length > 0) win = doc.layoutWindows[0];
-            if (item.parentPage && win) win.activePage = item.parentPage;
-        } catch (error) {}
-        try {
-            item.select();
-        } catch (error) {}
-        try {
-            if (win && !fitSelection(win)) {
-                try {
-                    win.zoom(ZoomOptions.FIT_PAGE);
-                } catch (_fitPageError) {}
-            }
-        } catch (error) {}
-    }
-
-    function buildLabel(candidate, index) {
-        var indexText = String(index + 1);
-        if (indexText.length < 2) indexText = "0" + indexText;
-        var displayInfo = getCandidateDisplayInfo(candidate, index);
-        var nameText = displayInfo.fileName;
-        var folderText = displayInfo.folderPath;
-        return indexText + "　" + nameText + "　" + folderText;
-    }
-
-    function updateDetailText(detailControls, candidate) {
-        if (!detailControls) return;
-        var photoshopPathText = getPhotoshopDisplayPath();
-        if (!candidate) {
-            detailControls.pathText.text = "";
-            detailControls.ppiText.text = "";
-            return;
-        }
-        var effectivePpi = Number(candidate.effectivePPI) || NaN;
-        detailControls.pathText.text = remoteText("Photoshop画像パス：", "Photoshop image path: ") + (photoshopPathText || remoteText("(不明)", "(Unknown)"));
-        detailControls.ppiText.text = remoteText("選択した配置サイズでのppi：", "PPI at selected placed size: ") + (isFinite(effectivePpi) ? effectivePpi.toFixed(2) : "-");
-    }
-
-    var dialog = new Window("dialog", (payload && payload.title) ? payload.title : remoteText("リンクを選択", "Select Link"));
-    dialog.orientation = "column";
-    dialog.alignChildren = ["fill", "top"];
-    dialog.spacing = 8;
-    dialog.margins = 12;
-
-    function addMessageLine(text) {
-        if (!text) return null;
-        var line = dialog.add("statictext", undefined, text);
-        line.minimumSize.width = 820;
-        return line;
-    }
-
-    addMessageLine(payload && payload.messageLine1);
-    addMessageLine(payload && payload.messageLine2);
-    addMessageLine(payload && payload.messageLine3);
-
-    var infoText = dialog.add("statictext", undefined, remoteText("候補数: ", "Candidates: ") + items.length);
-    infoText.minimumSize.width = 820;
-
-    var listBox = dialog.add("listbox", undefined, [], {
-        multiselect: false
-    });
-    listBox.preferredSize = [820, 260];
-    for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
-        var listItem = listBox.add("item", buildLabel(items[itemIndex], itemIndex));
-        listItem.candidate = items[itemIndex];
-    }
-
-    var detailGroup = dialog.add("group");
-    detailGroup.orientation = "column";
-    detailGroup.alignChildren = ["fill", "top"];
-    detailGroup.minimumSize.width = 820;
-    var pathText = detailGroup.add("statictext", undefined, "");
-    pathText.minimumSize.width = 820;
-    var ppiText = detailGroup.add("statictext", undefined, "");
-    ppiText.minimumSize.width = 820;
-    var detailControls = {
-        pathText: pathText,
-        ppiText: ppiText
-    };
-
-    listBox.onChange = function() {
-        if (!this.selection) return;
-        updateDetailText(detailControls, this.selection.candidate);
-        focusCandidate(this.selection.candidate);
-    };
-
-    var initialListIndex = 0;
-    if (payload && payload.initialLinkIndex != null) {
-        for (var initialIndex = 0; initialIndex < items.length; initialIndex++) {
-            if (Number(items[initialIndex].linkIndex) === Number(payload.initialLinkIndex)) {
-                initialListIndex = initialIndex;
-                break;
-            }
-        }
-    }
-    if (listBox.items.length > 0) {
-        listBox.selection = listBox.items[initialListIndex];
-        updateDetailText(detailControls, listBox.selection.candidate);
-    }
-
-    dialog.onShow = function() {
-        try {
-            BridgeTalk.bringToFront("indesign");
-        } catch (error) {}
-        try {
-            app.bringToFront();
-        } catch (error) {}
-        if (!listBox.selection) return;
-        focusCandidate(listBox.selection.candidate);
-    };
-
-    var buttonGroup = dialog.add("group");
-    buttonGroup.orientation = "row";
-    buttonGroup.alignment = ["right", "center"];
-    var cancelButton = buttonGroup.add("button", undefined, remoteText("キャンセル", "Cancel"), { name: "cancel" });
-    var okButton = buttonGroup.add("button", undefined, "OK", { name: "ok" });
-
-    cancelButton.onClick = function() {
-        dialog.close(0);
-    };
-    okButton.onClick = function() {
-        if (!listBox.selection) {
-            alert(remoteText("候補を選択してください。", "Select a candidate."));
-            return;
-        }
-        dialog.close(1);
-    };
-
-    dialog.preferredSize = [860, 430];
-    var dialogResult = dialog.show();
-    if (dialogResult !== 1 || !listBox.selection) {
-        return "null";
-    }
-    return listBox.selection.candidate.toSource();
-}
-
-function chooseInDesignItemSync(payload) {
-    var body = "(" +
-        "function(){" +
-        "var remoteLocaleCode = " + toSourceLiteral(currentLocaleCode()) + ";" +
-        "function remoteText(jaText, enText) { return remoteLocaleCode === 'en' ? enText : jaText; }" +
-        chooseInInDesignSide.toString() + "\n" +
-        "return chooseInInDesignSide(" + toSourceLiteral(payload) + ");" +
-        "}" +
-        ")();";
-    try {
-        BridgeTalk.bringToFront("indesign");
-    } catch (error) {}
-    var bridgeTalkResult = sendBridgeTalkAndWait("indesign", body, 300000);
-    activatePhotoshopWindow();
-    if (!bridgeTalkResult.ok) {
-        alert(localText("InDesign通信エラー: ", "InDesign communication error: ") + bridgeTalkResult.error);
-        return null;
-    }
-    if (!bridgeTalkResult.body || bridgeTalkResult.body == "null") {
-        return null;
-    }
-    return parseBridgeTalkJson(bridgeTalkResult.body, bridgeTalkResult.body, "InDesign");
-}
-
-function selectInInDesign(handle) {
-    var chooserPayload = buildInDesignChooserPayload(handle && handle.items ? handle.items : [], handle ? handle.linkIndex : null, {
-        title: localText("InDesignでリンクを選択", "Select Link in InDesign"),
-        messageLine1: localText("候補が複数あります。", "There are multiple candidates."),
-        messageLine2: localText("選ぶと該当リンクを中央表示します。", "Selecting one centers the corresponding link."),
-        photoshopPathRaw: handle && handle.pathFs ? String(handle.pathFs) : ""
-    });
-    var btShow = new BridgeTalk();
-    btShow.target = "indesign";
-    btShow.onResult = function() {
-        try {
-            BridgeTalk.bringToFront("indesign");
-        } catch (_bringToFrontError) {}
-    };
-    btShow.onError = function(e) {
-        alert(localText("InDesign通信エラー: ", "InDesign communication error: ") + e.body);
-    };
     var showSrc = showInInDesignSide.toString()
         .replace("/*__INJECT_HELPERS__*/",
+            "var toNFCJa = " + NFC_HELPER_SRC + ";\n" +
             "var _normPath = " + NORM_HELPER_SRC_ID + ";\n" +
-            "var _matchLinkPath = " + MATCH_LINK_HELPER_SRC + ";\n" +
-            "var _decodeAndNormalizePath = " + DECODE_NORM_HELPER_SRC + ";\n" +
-            "var _decodePathRaw = " + DECODE_RAW_HELPER_SRC + ";");
-    btShow.body = "(" +
+            "var getInDesignParentPage = " + INDESIGN_PARENT_PAGE_HELPER_SRC + ";");
+    var showBody = "(" +
         "function(){" +
         "var remoteLocaleCode = " + toSourceLiteral(currentLocaleCode()) + ";" +
         "function remoteText(jaText, enText) { return remoteLocaleCode === 'en' ? enText : jaText; }" +
-        chooseInInDesignSide.toString() + "\n" +
         showSrc + "\n" +
         "var __handle = " + toSourceLiteral(handle || {}) + ";" +
-        "if (__handle.items && __handle.items.length > 1) {" +
-        "chooseInInDesignSide(" + toSourceLiteral(chooserPayload) + ");" +
-        "} else {" +
         "showInInDesignSide(__handle);" +
-        "}" +
+        "return 'ok';" +
         "}" +
         ")();";
-    try {
-        BridgeTalk.bringToFront("indesign");
-    } catch (_bringToFrontBeforeSendError) {}
-    btShow.send();
+    var bridgeTalkResult = sendBridgeTalkAndWait(bridgeTarget, showBody, 15000);
+    if (!bridgeTalkResult.ok) {
+        alert(localText("InDesign通信エラー: ", "InDesign communication error: ") + bridgeTalkResult.error);
+        return false;
+    }
+    if (bringApplicationToFront !== false) {
+        bringInDesignTargetToFront(bridgeTarget);
+    }
+    return true;
 }
 
 // リサイズ確認ダイアログ: 画像情報（非ボールド）+ 配置情報（ボールド）+ ppi/メソッド選択 + 警告
-function showConfirmDialog(messageBase, placedWmm, placedHmm, docWidthPx, docHeightPx, imgPath, hasSmartObject, placedPPI, minSizePpi, matchedItemCount, selectionHandle, usesNameOnlyLinkInfo) {
+function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, docHeightPx, imgPath, hasSmartObject, placedPPI, minPlacedPPI, maxPlacedPPI, matchedItemCount, selectionHandle, usesNameOnlyLinkInfo) {
     var WARN_STYLE_RED_BOLD = "redBold";
     var WARN_STYLE_DEFAULT_BOLD = "defaultBold";
     var WARN_STYLE_DEFAULT_NORMAL = "defaultNormal";
-    var doc = app.activeDocument;
     var prefs = loadPrefs();
     var resolutionLabels = [];
     for (var resolutionIndex = 0; resolutionIndex < targetPPIList.length; resolutionIndex++) {
@@ -2237,7 +2341,7 @@ function showConfirmDialog(messageBase, placedWmm, placedHmm, docWidthPx, docHei
         var labels = [
             localText("伸ばし/トリミングを行わない", "Do not extend or trim"),
             localText("伸ばして、トリム部分にガイドを引く（画像を削りません）", "Extend and add guides at the trim edges (no image pixels are deleted)"),
-            localText("伸ばして、トリム部分を切り抜く", "Extend and crop to the frame")
+            localText("伸ばして、トリム部分を切り抜く（フレーム外を削除します）", "Extend and crop to the trim area (deletes image content outside the frame)")
         ];
         var values = [
             TRIMMING_MODE_NONE,
@@ -2257,38 +2361,23 @@ function showConfirmDialog(messageBase, placedWmm, placedHmm, docWidthPx, docHei
             buttons.push(button);
         }
 
-        var cropHintGroup = panel.add("group");
-        cropHintGroup.orientation = "row";
-        cropHintGroup.alignChildren = ["left", "top"];
-        cropHintGroup.margins = [20, 0, 0, 0];
-        var cropHint = cropHintGroup.add(
+        var xmpDescriptionGroup = panel.add("group");
+        xmpDescriptionGroup.orientation = "row";
+        xmpDescriptionGroup.alignChildren = ["left", "top"];
+        xmpDescriptionGroup.margins = [20, 4, 0, 0];
+        xmpDescriptionGroup.add(
             "statictext",
             undefined,
             localText(
-                "（リンク更新し「内容をフレームに合わせる」等で合います）",
-                "(After updating the link, use \"Fit Content to Frame\" or a similar command)"
+                "伸ばし処理はxmpタグを埋め込みます。InDesign側のスクリプトで処理してください",
+                "Extending the image embeds an XMP tag. Use the InDesign-side script to process the image."
             )
         );
-
-        var infoPanel = panel.add("panel", undefined, localText("情報", "Information"));
-        infoPanel.orientation = "column";
-        infoPanel.alignChildren = ["fill", "top"];
-        infoPanel.alignment = ["fill", "top"];
-        infoPanel.margins = [8, 10, 8, 8];
-
-        var infoText = infoPanel.add("statictext", undefined, " \n ", {
-            multiline: true
-        });
-        infoText.minimumSize.width = 400;
-        infoText.alignment = ["fill", "top"];
 
         return {
             panel: panel,
             buttons: buttons,
-            values: values,
-            cropHint: cropHint,
-            infoPanel: infoPanel,
-            infoText: infoText
+            values: values
         };
     }
 
@@ -2329,7 +2418,7 @@ function showConfirmDialog(messageBase, placedWmm, placedHmm, docWidthPx, docHei
     function buildUsePrevArea(dlg, currentPrefs) {
         var group = dlg.add("group");
         group.alignment = ["left", "center"];
-        var checkbox = group.add("checkbox", undefined, localText("▶前回設定値を使用する", "Use previous settings"));
+        var checkbox = group.add("checkbox", undefined, localText("▶前回設定値を使用する（トリミング選択以外）", "Use previous settings (except the trimming selection)"));
         checkbox.value = currentPrefs.usePrev === true;
 
         var infoText = dlg.add("statictext", undefined, " ");
@@ -2446,8 +2535,8 @@ function showConfirmDialog(messageBase, placedWmm, placedHmm, docWidthPx, docHei
     }
 
     function computeDialogState(selectionState, historyWarning) {
-        var requiredW = Math.round(placedWmm * selectionState.ppi / 25.4);
-        var requiredH = Math.round(placedHmm * selectionState.ppi / 25.4);
+        var requiredW = placedWmm * selectionState.ppi / 25.4;
+        var requiredH = placedHmm * selectionState.ppi / 25.4;
         var scale = Math.max(requiredW / docWidthPx, requiredH / docHeightPx);
         var scalePct = scale * 100;
         var warningBag = createWarningBag();
@@ -2475,24 +2564,34 @@ function showConfirmDialog(messageBase, placedWmm, placedHmm, docWidthPx, docHei
                 addWarning(warningBag, WARN_STYLE_RED_BOLD, localText("【警告：キャンセルを推奨】\n　拡大率が ", "[Warning: cancel recommended]\nScale exceeds ") + (scaleMax * 100).toFixed(0) + localText("% を超えています。\n　Photoshop以外の手段を検討してください。", "%. Consider a method other than Photoshop."));
             }
         }
-        if (matchedItemCount > 1 && isFinite(placedPPI) && placedPPI > 0 && isFinite(minSizePpi)) {
-            var postResizeMinPpi = minSizePpi * (selectionState.ppi / placedPPI);
+        var hasPostResizePpiRange = matchedItemCount > 1 &&
+            isFinite(placedPPI) && placedPPI > 0 &&
+            isFinite(minPlacedPPI) && isFinite(maxPlacedPPI);
+        var postResizeMinPpi = hasPostResizePpiRange
+            ? minPlacedPPI * (selectionState.ppi / placedPPI)
+            : NaN;
+        var postResizeMaxPpi = hasPostResizePpiRange
+            ? maxPlacedPPI * (selectionState.ppi / placedPPI)
+            : NaN;
+        if (hasPostResizePpiRange) {
             var minAllowedPpi = selectionState.ppi * efScaleMin;
             var maxAllowedPpi = selectionState.ppi * efScaleMax;
-            if (postResizeMinPpi < minAllowedPpi || postResizeMinPpi > maxAllowedPpi) {
+            if (postResizeMinPpi < minAllowedPpi || postResizeMaxPpi > maxAllowedPpi) {
+                var postResizeRangeText = Math.abs(postResizeMaxPpi - postResizeMinPpi) < 0.01
+                    ? postResizeMinPpi.toFixed(2)
+                    : postResizeMinPpi.toFixed(2) + "–" + postResizeMaxPpi.toFixed(2);
                 addWarning(
                     warningBag,
                     WARN_STYLE_DEFAULT_BOLD,
-                    localText("【注意】\n　他の配置画像の実効解像度が ", "[Caution]\nThe effective resolution of another placed image will become ") + postResizeMinPpi.toFixed(2) + localText(" ppi になり、指定解像度から外れます。\n　画像ファイルを分けることを推奨します。", " ppi, outside the selected resolution. Using separate image files is recommended.")
+                    localText("【注意】\n　配置画像の処理後の実効解像度範囲が ", "[Caution]\nThe post-process effective-resolution range of the placed images will be ") + postResizeRangeText + localText(" ppi になり、指定解像度から外れます。\n　画像ファイルを分けることを推奨します。", " ppi, outside the selected resolution. Using separate image files is recommended.")
                 );
             }
         }
         return {
             scaleText: localText("拡縮率: ", "Scale: ") + scalePct.toFixed(2) + " %",
             warningBag: warningBag,
-            postResizeMinPpi: (matchedItemCount > 1 && isFinite(placedPPI) && placedPPI > 0 && isFinite(minSizePpi))
-                ? (minSizePpi * (selectionState.ppi / placedPPI))
-                : NaN
+            postResizeMinPpi: postResizeMinPpi,
+            postResizeMaxPpi: postResizeMaxPpi
         };
     }
 
@@ -2500,10 +2599,16 @@ function showConfirmDialog(messageBase, placedWmm, placedHmm, docWidthPx, docHei
         var computed = computeDialogState(collectSelectionState(ui), historyWarning);
         ui.scaleText.text = computed.scaleText;
         if (ui.info && ui.info.extraText) {
+            var postResizeRangeText = "-";
+            if (isFinite(computed.postResizeMinPpi) && isFinite(computed.postResizeMaxPpi)) {
+                postResizeRangeText = Math.abs(computed.postResizeMaxPpi - computed.postResizeMinPpi) < 0.01
+                    ? computed.postResizeMinPpi.toFixed(2)
+                    : computed.postResizeMinPpi.toFixed(2) + "–" + computed.postResizeMaxPpi.toFixed(2);
+            }
             ui.info.extraText.text =
                 localText("配置点数: ", "Placed items: ") + matchedItemCount + "\n" +
-                localText("最小画像の処理後のppi: ", "Post-process PPI of smallest image: ") + (isFinite(computed.postResizeMinPpi) ? computed.postResizeMinPpi.toFixed(2) : "-") + "\n" +
-                localText("※最大サイズの画像を処理します。", "The largest image size will be processed.");
+                localText("処理後の実効ppi範囲: ", "Post-process effective-PPI range: ") + postResizeRangeText + "\n" +
+                localText("※選択した配置を基準に処理します。", "The selected placement is used for processing.");
         }
         renderWarningRows(ui.warningRows, computed.warningBag, skipRedraw === true, dlg);
     }
@@ -2529,7 +2634,7 @@ function showConfirmDialog(messageBase, placedWmm, placedHmm, docWidthPx, docHei
 
     var historyWarning = "";
     try {
-        var historyStatus = getHistoryStatusByName(HISTORY_NAME);
+        var historyStatus = getHistoryStatusByName(doc, HISTORY_NAME);
         if (historyStatus && historyStatus.exists && (historyStatus.status === "active" || historyStatus.status === "applied")) {
             historyWarning = localText("【注意：キャンセル推奨】\n　すでにリサイズを実行済みです！実際の配置と異なる可能性があります。\n　ヒストリーを削除するか画像を保存して開き直し、リンクを更新してから実行してください", "[Caution: cancel recommended]\nResize has already been run. The result may differ from the actual placement.\nDelete the history state, or save and reopen the image, update the link, then run again.");
         }
@@ -2577,12 +2682,13 @@ function showConfirmDialog(messageBase, placedWmm, placedHmm, docWidthPx, docHei
         savePrefsAndClose(0, false);
     };
     buttonRow.appButton.onClick = function () {
-        selectInInDesign(selectionHandle || {
+        if (selectInInDesign(selectionHandle || {
             linkIndex: null,
             pathFs: encodeURI(imgPath),
             items: []
-        });
-        savePrefsAndClose(2, false);
+        }, true)) {
+            savePrefsAndClose(2, false);
+        }
     };
     buttonRow.helpButton.onClick = function () {
         openURLInBrowser("https://gist.github.com/Yamonov/d06d117b56445e52b30764b9c994356c");
@@ -2642,243 +2748,6 @@ function getCropIntegration() {
 }
 
 function createCropIntegration() {
-function toNFCJa(s) {
-    if (!s) return s;
-    var map = {
-        "カ\u3099": "ガ",
-        "キ\u3099": "ギ",
-        "ク\u3099": "グ",
-        "ケ\u3099": "ゲ",
-        "コ\u3099": "ゴ",
-        "サ\u3099": "ザ",
-        "シ\u3099": "ジ",
-        "ス\u3099": "ズ",
-        "セ\u3099": "ゼ",
-        "ソ\u3099": "ゾ",
-        "タ\u3099": "ダ",
-        "チ\u3099": "ヂ",
-        "ツ\u3099": "ヅ",
-        "テ\u3099": "デ",
-        "ト\u3099": "ド",
-        "ハ\u3099": "バ",
-        "ヒ\u3099": "ビ",
-        "フ\u3099": "ブ",
-        "ヘ\u3099": "ベ",
-        "ホ\u3099": "ボ",
-        "ウ\u3099": "ヴ",
-        "ワ\u3099": "ヷ",
-        "ヰ\u3099": "ヸ",
-        "ヱ\u3099": "ヹ",
-        "ヲ\u3099": "ヺ",
-        "ハ\u309A": "パ",
-        "ヒ\u309A": "ピ",
-        "フ\u309A": "プ",
-        "ヘ\u309A": "ペ",
-        "ホ\u309A": "ポ",
-        "か\u3099": "が",
-        "き\u3099": "ぎ",
-        "く\u3099": "ぐ",
-        "け\u3099": "げ",
-        "こ\u3099": "ご",
-        "さ\u3099": "ざ",
-        "し\u3099": "じ",
-        "す\u3099": "ず",
-        "せ\u3099": "ぜ",
-        "そ\u3099": "ぞ",
-        "た\u3099": "だ",
-        "ち\u3099": "ぢ",
-        "つ\u3099": "づ",
-        "て\u3099": "で",
-        "と\u3099": "ど",
-        "は\u3099": "ば",
-        "ひ\u3099": "び",
-        "ふ\u3099": "ぶ",
-        "へ\u3099": "べ",
-        "ほ\u3099": "ぼ",
-        "う\u3099": "ゔ",
-        "は\u309A": "ぱ",
-        "ひ\u309A": "ぴ",
-        "ふ\u309A": "ぷ",
-        "へ\u309A": "ぺ",
-        "ほ\u309A": "ぽ",
-        "A\u0301": "Á",
-        "E\u0301": "É",
-        "I\u0301": "Í",
-        "O\u0301": "Ó",
-        "U\u0301": "Ú",
-        "Y\u0301": "Ý",
-        "a\u0301": "á",
-        "e\u0301": "é",
-        "i\u0301": "í",
-        "o\u0301": "ó",
-        "u\u0301": "ú",
-        "y\u0301": "ý",
-        "A\u0300": "À",
-        "E\u0300": "È",
-        "I\u0300": "Ì",
-        "O\u0300": "Ò",
-        "U\u0300": "Ù",
-        "a\u0300": "à",
-        "e\u0300": "è",
-        "i\u0300": "ì",
-        "o\u0300": "ò",
-        "u\u0300": "ù",
-        "A\u0302": "Â",
-        "E\u0302": "Ê",
-        "I\u0302": "Î",
-        "O\u0302": "Ô",
-        "U\u0302": "Û",
-        "a\u0302": "â",
-        "e\u0302": "ê",
-        "i\u0302": "î",
-        "o\u0302": "ô",
-        "u\u0302": "û",
-        "A\u0308": "Ä",
-        "E\u0308": "Ë",
-        "I\u0308": "Ï",
-        "O\u0308": "Ö",
-        "U\u0308": "Ü",
-        "Y\u0308": "Ÿ",
-        "a\u0308": "ä",
-        "e\u0308": "ë",
-        "i\u0308": "ï",
-        "o\u0308": "ö",
-        "u\u0308": "ü",
-        "y\u0308": "ÿ",
-        "A\u0303": "Ã",
-        "N\u0303": "Ñ",
-        "O\u0303": "Õ",
-        "a\u0303": "ã",
-        "n\u0303": "ñ",
-        "o\u0303": "õ",
-        "A\u030A": "Å",
-        "a\u030A": "å",
-        "A\u0304": "Ā",
-        "E\u0304": "Ē",
-        "I\u0304": "Ī",
-        "O\u0304": "Ō",
-        "U\u0304": "Ū",
-        "a\u0304": "ā",
-        "e\u0304": "ē",
-        "i\u0304": "ī",
-        "o\u0304": "ō",
-        "u\u0304": "ū",
-        "C\u030C": "Č",
-        "D\u030C": "Ď",
-        "E\u030C": "Ě",
-        "N\u030C": "Ň",
-        "R\u030C": "Ř",
-        "S\u030C": "Š",
-        "T\u030C": "Ť",
-        "Z\u030C": "Ž",
-        "c\u030C": "č",
-        "d\u030C": "ď",
-        "e\u030C": "ě",
-        "n\u030C": "ň",
-        "r\u030C": "ř",
-        "s\u030C": "š",
-        "t\u030C": "ť",
-        "z\u030C": "ž",
-        "Z\u0307": "Ż",
-        "z\u0307": "ż",
-        "A\u0328": "Ą",
-        "E\u0328": "Ę",
-        "a\u0328": "ą",
-        "e\u0328": "ę",
-        "C\u0327": "Ç",
-        "c\u0327": "ç"
-    };
-    var out = String(s);
-    for (var k in map) out = out.split(k).join(map[k]);
-    return out;
-}
-// 実体解決 + fsName + NFC化
-function _normPathLocal(p) {
-    try {
-        var f = new File(p);
-        try {
-            f = f.resolve();
-        } catch (_e) {}
-        var s = f.fsName;
-        return toNFCJa(s);
-    } catch (e) {
-        try {
-            return toNFCJa(String(p));
-        } catch (e2) {
-            return String(p);
-        }
-    }
-}
-var NFC_HELPER_SRC = toNFCJa.toString();
-function _normPathLocalNoNFC(p) {
-    try {
-        var f = new File(p);
-        try {
-            f = f.resolve();
-        } catch (_e) {}
-        return f.fsName;
-    } catch (e) {
-        try {
-            return String(p);
-        } catch (e2) {
-            return String(p);
-        }
-    }
-}
-function _matchLinkPathLocal(linkFilePath, rawTargetPath, targetNorm) {
-    if (String(linkFilePath || "") === String(rawTargetPath || "")) return true;
-    var lnkNorm = _normPath(linkFilePath);
-    return (lnkNorm === targetNorm);
-}
-function _decodeAndNormalizePathLocal(encodedPath) {
-    var decoded = decodeURIComponent(encodedPath);
-    decoded = toNFCJa(decoded);
-    try {
-        decoded = _normPath(decoded);
-    } catch (_e) {}
-    return decoded;
-}
-function _decodePathRawLocal(encodedPath) {
-    var decoded = decodeURIComponent(encodedPath);
-    return toNFCJa(decoded);
-}
-function toSourceLiteral(value) {
-    if (value === null) return "null";
-    if (typeof value === "undefined") return "undefined";
-    var valueType = typeof value;
-    if (valueType === "string") {
-        return '"' + String(value)
-            .replace(/\\/g, "\\\\")
-            .replace(/"/g, '\\"')
-            .replace(/\r/g, "\\r")
-            .replace(/\n/g, "\\n")
-            .replace(/\t/g, "\\t")
-            .replace(/\f/g, "\\f")
-            .replace(/\u0008/g, "\\b") + '"';
-    }
-    if (valueType === "number" || valueType === "boolean") {
-        return String(value);
-    }
-    if (value instanceof Array) {
-        var arrayParts = [];
-        for (var arrayIndex = 0; arrayIndex < value.length; arrayIndex++) {
-            arrayParts.push(toSourceLiteral(value[arrayIndex]));
-        }
-        return "[" + arrayParts.join(",") + "]";
-    }
-    var objectParts = [];
-    for (var key in value) {
-        if (!value.hasOwnProperty(key)) continue;
-        objectParts.push(key + ":" + toSourceLiteral(value[key]));
-    }
-    return "({" + objectParts.join(",") + "})";
-}
-var NORM_HELPER_SRC_ID = _normPathLocalNoNFC.toString();
-var MATCH_LINK_HELPER_SRC = _matchLinkPathLocal.toString();
-var DECODE_NORM_HELPER_SRC = _decodeAndNormalizePathLocal.toString();
-var DECODE_RAW_HELPER_SRC = _decodePathRawLocal.toString();
-var DECODE_URI_SAFE_TEXT_SRC = decodeUriSafeText.toString();
-var NORMALIZE_DISPLAY_SLASHES_SRC = normalizeDisplaySlashes.toString();
 var TO_SOURCE_LITERAL_SRC = toSourceLiteral.toString();
 var REPLACEMENT_XMP_NAMESPACE_URI = "http://ns.yamo.jp/photoshop/crop-replacement-data/1.0/";
 var REPLACEMENT_XMP_PREFIX = "yamoCrop:";
@@ -2961,350 +2830,32 @@ function escapeJSONString(text) {
         .replace(/\n/g, "\\n")
         .replace(/\t/g, "\\t");
 }
-function requestCropDataFromInDesign(doc, preferredLinkIndex) {
-    var encodedFilePath = "";
-    try {
-        encodedFilePath = encodeURIComponent(_normPathLocal(doc.fullName.fsName));
-    } catch (pathError) {
+function requestCropDataFromInDesign(placementSession) {
+    if (!placementSession || !placementSession.bridgeTarget ||
+            placementSession.documentId == null || placementSession.linkId == null) {
         return {
             status: "error",
-            message: localText(
-                "保存されていないドキュメントでは実行できません。保存してから実行してください。",
-                "This script cannot run on an unsaved document. Save the document and run it again."
-            )
+            message: localText("選択したInDesign配置を確認できません。", "The selected InDesign placement could not be verified.")
         };
     }
-    var inDesignResponse = sendToInDesign(encodedFilePath, String(doc.name || ""));
-    activatePhotoshop();
-    var responseObject = parseBridgeTalkResponse(inDesignResponse);
-    if (responseObject) {
-        responseObject = resolveMultipleCropCandidates(doc, responseObject, preferredLinkIndex);
-        return responseObject;
+    var bridgeResult = sendToInDesign(placementSession);
+    activatePhotoshopWindow();
+    if (!bridgeResult || bridgeResult.ok !== true) {
+        return {
+            status: "error",
+            message: localText("InDesign通信エラー: ", "InDesign communication error: ") +
+                String(bridgeResult && bridgeResult.error ? bridgeResult.error : localText("原因不明のエラー", "Unknown error"))
+        };
     }
+    var responseObject = parseBridgeTalkResponse(bridgeResult.body);
+    if (responseObject) return responseObject;
     return {
         status: "error",
-        message: localText("InDesign応答の解析に失敗しました。", "Failed to parse the InDesign response.") + "\r" + inDesignResponse
+        message: localText("InDesign応答の解析に失敗しました。", "Failed to parse the InDesign response.") + "\r" + bridgeResult.body
     };
 }
 
-function resolveMultipleCropCandidates(doc, responseObject, preferredLinkIndex) {
-    if (!responseObject || responseObject.status !== "ok") {
-        return responseObject;
-    }
-    if (!(responseObject.candidates instanceof Array) || responseObject.candidates.length <= 1) {
-        return responseObject;
-    }
-
-    var selectedCandidate = chooseCropCandidateInDesign(
-        buildCropCandidateChooserPayload(doc, responseObject, preferredLinkIndex)
-    );
-    if (!selectedCandidate) {
-        return { status: "cancel" };
-    }
-
-    responseObject.selectedIndex = selectedCandidate.index;
-    responseObject.selected = selectedCandidate;
-    responseObject.normalizedFrameBounds = selectedCandidate.normalizedFrameBounds;
-    return responseObject;
-}
-
-function buildCropCandidateChooserPayload(doc, responseObject, preferredLinkIndex) {
-    function encodeChooserText(text) {
-        return encodeURI(String(text || ""));
-    }
-
-    function encodeChooserItems(sourceItems) {
-        var encodedItems = [];
-        var itemList = sourceItems || [];
-        for (var i = 0; i < itemList.length; i++) {
-            var item = itemList[i] || {};
-            var encodedItem = {};
-            for (var key in item) {
-                if (!item.hasOwnProperty(key)) continue;
-                encodedItem[key] = item[key];
-            }
-            encodedItem.linkName = encodeChooserText(item.linkName || "");
-            encodedItem.rawFileName = encodeChooserText(item.rawFileName || "");
-            encodedItem.rawFilePath = encodeChooserText(item.rawFilePath || "");
-            encodedItem.rawFolderPath = encodeChooserText(item.rawFolderPath || "");
-            encodedItems.push(encodedItem);
-        }
-        return encodedItems;
-    }
-
-    return {
-        items: encodeChooserItems(responseObject.candidates || []),
-        initialLinkIndex: preferredLinkIndex != null
-            ? Number(preferredLinkIndex)
-            : (responseObject.candidates.length ? responseObject.candidates[0].linkIndex : null),
-        title: localText("リンクを選択", "Select Link"),
-        messageLines: buildCropCandidateDialogMessages(responseObject),
-        photoshopPathRaw: encodeChooserText(doc && doc.fullName ? doc.fullName.fsName : "")
-    };
-}
-
-function buildCropCandidateDialogMessages(responseObject) {
-    var candidates = responseObject && responseObject.candidates ? responseObject.candidates : [];
-    var linkName = candidates.length ? String(candidates[0].linkName || "") : "";
-    var messageLines = [
-        localText("「", "\"") + linkName + localText("」が複数配置されています。", "\" is placed multiple times."),
-        localText("トリミングを取得するものを選んでください。", "Choose the placed item to read trimming from."),
-        localText("※リストを選択すると該当画像を表示します", "Selecting an item in the list shows the corresponding image.")
-    ];
-    if (!responseObject || responseObject.matchType !== "nameOnly") {
-        return messageLines;
-    }
-    messageLines.push(localText("同名ファイルから候補を見つけています。", "Candidates were found from files with the same name."));
-    if (responseObject.hasFolderDifference) {
-        messageLines.push(localText("元画像とフォルダが異なる候補が含まれます。", "Some candidates are in a different folder from the source image."));
-    }
-    if (responseObject.hasExtensionDifference) {
-        messageLines.push(localText("元画像と拡張子が異なる候補が含まれます。", "Some candidates use a different extension from the source image."));
-    }
-    return messageLines;
-}
-
-function chooseCropCandidateInInDesignSide(payload) {
-    /*__INJECT_TO_NFC_JA__*/
-    if (app.documents.length === 0) return "null";
-    var doc = app.activeDocument;
-    var items = (payload && payload.items && payload.items.length) ? payload.items : null;
-    if (!items) return "null";
-    var isWindows = $.os.indexOf("Windows") >= 0;
-
-    function buildDialogDisplayPath(pathText) {
-        var value = decodeUriSafeText(pathText);
-        if (isWindows) {
-            value = normalizeDisplaySlashes(value, "/");
-            return value.split("/").join("\\");
-        }
-        return value.split("\\ ").join(" ");
-    }
-
-    function splitDisplayPathInfo(pathText, fallbackFileName) {
-        var value = buildDialogDisplayPath(pathText);
-        var fallbackName = buildDialogDisplayPath(fallbackFileName);
-        var slashIndex = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
-        if (slashIndex >= 0) {
-            return {
-                fileName: value.substring(slashIndex + 1) || fallbackName,
-                folderPath: value.substring(0, slashIndex)
-            };
-        }
-        return {
-            fileName: fallbackName || value,
-            folderPath: value && fallbackName && value !== fallbackName ? value : ""
-        };
-    }
-
-    function getCandidateDisplayInfo(candidate, index) {
-        if (candidate && candidate.rawFilePath) {
-            return splitDisplayPathInfo(candidate.rawFilePath, candidate.rawFileName);
-        }
-        return {
-            fileName: candidate && candidate.linkName ? buildDialogDisplayPath(candidate.linkName) : (remoteText("リンク ", "Link ") + (index + 1)),
-            folderPath: candidate && candidate.rawFolderPath ? buildDialogDisplayPath(candidate.rawFolderPath) : remoteText("(不明)", "(Unknown)")
-        };
-    }
-
-    function buildCandidateDialogLabel(candidate, index) {
-        var indexText = String(index + 1);
-        if (indexText.length < 2) {
-            indexText = "0" + indexText;
-        }
-        var displayInfo = getCandidateDisplayInfo(candidate, index);
-        return indexText + "　" + displayInfo.fileName + "　" + displayInfo.folderPath;
-    }
-
-    function buildCandidateDetailPathText(rawPath) {
-        return remoteText("Photoshop画像パス：", "Photoshop image path: ") + buildDialogDisplayPath(rawPath);
-    }
-
-    function clearCandidateDetailText(detailControls) {
-        detailControls.pathText.text = "";
-    }
-
-    function updateCandidateDetailText(detailControls, candidate) {
-        if (!detailControls) return;
-        if (!candidate) {
-            clearCandidateDetailText(detailControls);
-            return;
-        }
-        detailControls.pathText.text = buildCandidateDetailPathText((payload && payload.photoshopPathRaw) ? payload.photoshopPathRaw : "");
-    }
-
-    function fitSelection(win) {
-        try {
-            var fitSelectionAction = app.menuActions.itemByName("$ID/Fit Selection in Window");
-            if (fitSelectionAction && fitSelectionAction.isValid) {
-                fitSelectionAction.invoke();
-                return true;
-            }
-        } catch (_menuError) {}
-        try {
-            win.zoom(ZoomOptions.FIT_SPREAD);
-            return true;
-        } catch (_spreadError) {}
-        return false;
-    }
-
-    function findLink(candidate) {
-        var linkIndex = Number(candidate ? candidate.linkIndex : NaN);
-        if (!isFinite(linkIndex)) return null;
-        linkIndex = Math.floor(linkIndex);
-        if (linkIndex < 0 || linkIndex >= doc.links.length) return null;
-        try {
-            return doc.links[linkIndex];
-        } catch (_findLinkError) {
-            return null;
-        }
-    }
-
-    function focusCandidate(candidate) {
-        var link = findLink(candidate);
-        if (!link) return;
-        var item = null;
-        try {
-            item = link.parent;
-        } catch (_parentError) {
-            item = null;
-        }
-        if (!item) return;
-        var win = null;
-        try {
-            if (doc.layoutWindows.length > 0) win = doc.layoutWindows[0];
-            if (item.parentPage && win) win.activePage = item.parentPage;
-        } catch (_pageError) {}
-        try {
-            item.select();
-        } catch (_selectError) {}
-        try {
-            if (win && !fitSelection(win)) {
-                try {
-                    win.zoom(ZoomOptions.FIT_PAGE);
-                } catch (_fitPageError) {}
-            }
-        } catch (_zoomError) {}
-    }
-
-    var dialog = new Window("dialog", (payload && payload.title) ? payload.title : remoteText("リンクを選択", "Select Link"));
-    dialog.orientation = "column";
-    dialog.alignChildren = ["fill", "top"];
-    dialog.spacing = 8;
-    dialog.margins = 12;
-
-    var messageLines = (payload && payload.messageLines && payload.messageLines.length) ? payload.messageLines : [];
-    for (var messageIndex = 0; messageIndex < messageLines.length; messageIndex++) {
-        var line = dialog.add("statictext", undefined, String(messageLines[messageIndex] || ""));
-        line.minimumSize.width = 820;
-    }
-
-    var infoText = dialog.add("statictext", undefined, remoteText("候補数: ", "Candidates: ") + items.length);
-    infoText.minimumSize.width = 820;
-
-    var listBox = dialog.add("listbox", undefined, [], {
-        multiselect: false
-    });
-    listBox.preferredSize = [820, 260];
-    for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
-        var listItem = listBox.add("item", buildCandidateDialogLabel(items[itemIndex], itemIndex));
-        listItem.candidate = items[itemIndex];
-    }
-
-    var detailGroup = dialog.add("group");
-    detailGroup.orientation = "column";
-    detailGroup.alignChildren = ["fill", "top"];
-    detailGroup.minimumSize.width = 820;
-    var pathText = detailGroup.add("statictext", undefined, "");
-    pathText.minimumSize.width = 820;
-    var detailControls = {
-        pathText: pathText
-    };
-
-    listBox.onChange = function() {
-        if (!this.selection) return;
-        updateCandidateDetailText(detailControls, this.selection.candidate);
-        focusCandidate(this.selection.candidate);
-    };
-
-    var initialListIndex = 0;
-    if (payload && payload.initialLinkIndex != null) {
-        for (var initialIndex = 0; initialIndex < items.length; initialIndex++) {
-            if (Number(items[initialIndex].linkIndex) === Number(payload.initialLinkIndex)) {
-                initialListIndex = initialIndex;
-                break;
-            }
-        }
-    }
-    if (listBox.items.length > 0) {
-        listBox.selection = listBox.items[initialListIndex];
-        updateCandidateDetailText(detailControls, listBox.selection.candidate);
-    }
-
-    dialog.onShow = function() {
-        try {
-            BridgeTalk.bringToFront("indesign");
-        } catch (_bringToFrontError) {}
-        try {
-            app.bringToFront();
-        } catch (_appBringToFrontError) {}
-        if (!listBox.selection) return;
-        focusCandidate(listBox.selection.candidate);
-    };
-
-    var buttonGroup = dialog.add("group");
-    buttonGroup.orientation = "row";
-    buttonGroup.alignment = ["right", "center"];
-    var cancelButton = buttonGroup.add("button", undefined, remoteText("キャンセル", "Cancel"), { name: "cancel" });
-    var okButton = buttonGroup.add("button", undefined, "OK", { name: "ok" });
-
-    cancelButton.onClick = function() {
-        dialog.close(0);
-    };
-    okButton.onClick = function() {
-        if (!listBox.selection) {
-            alert(remoteText("候補を選択してください。", "Select a candidate."));
-            return;
-        }
-        dialog.close(1);
-    };
-
-    dialog.preferredSize = [860, 430];
-    var dialogResult = dialog.show();
-    if (dialogResult !== 1 || !listBox.selection) {
-        return "null";
-    }
-    return listBox.selection.candidate.toSource();
-}
-
-function chooseCropCandidateInDesign(payload) {
-    var body = "(" +
-        "function(){" +
-        buildInjectedInDesignFunctionSource(chooseCropCandidateInInDesignSide) + "\n" +
-        "return chooseCropCandidateInInDesignSide(" + toSourceLiteral(payload) + ");" +
-        "}" +
-        ")();";
-    try {
-        BridgeTalk.bringToFront("indesign");
-    } catch (_bringToFrontError) {}
-    var responseText = sendBridgeTalkAndWait("indesign", body, 300000);
-    activatePhotoshop();
-    if (!responseText || responseText == "null") {
-        return null;
-    }
-    var responseObject = parseBridgeTalkResponse(responseText);
-    if (!responseObject) {
-        alert(localText("InDesign応答の解析に失敗しました。", "Failed to parse the InDesign response.") + "\nraw: " + responseText);
-        return null;
-    }
-    if (responseObject.status === "error") {
-        alert(responseObject.message || localText("InDesign通信エラーが発生しました。", "An InDesign communication error occurred."));
-        return null;
-    }
-    return responseObject;
-}
-
-function handleInDesignResponse(responseObject, doc) {
+function handleInDesignResponse(responseObject) {
     if (!responseObject) {
         alert(localText("InDesign応答の解析に失敗しました。", "Failed to parse the InDesign response."));
         return false;
@@ -3314,23 +2865,6 @@ function handleInDesignResponse(responseObject, doc) {
     }
     if (responseObject.status !== "ok") {
         alert(responseObject.message || localText("InDesign側でエラーが発生しました。", "An error occurred on the InDesign side."));
-        return false;
-    }
-    if (responseObject.matchType === "nameOnly" && responseObject.matchCount === 1 && responseObject.selected) {
-        var fallbackAction = showFallbackLinkConfirmDialog({
-            items: [responseObject.selected],
-            photoshopFileName: app.activeDocument ? app.activeDocument.name : "",
-            photoshopPath: app.activeDocument && app.activeDocument.fullName ? app.activeDocument.fullName.fsName : "",
-            hasFolderDifference: responseObject.hasFolderDifference,
-            hasExtensionDifference: responseObject.hasExtensionDifference
-        });
-        if (fallbackAction === "use") {
-            return true;
-        }
-        if (fallbackAction === "check") {
-            showMatchedLinkInInDesign(responseObject.selected);
-            return false;
-        }
         return false;
     }
     return true;
@@ -3369,308 +2903,27 @@ function buildPixelAdjustmentsFromResponse(responseObject, canvasWidth, canvasHe
     return [
         toPixelAdjustmentValue(normalizedBounds.minY, heightPx, "min"),
         toPixelAdjustmentValue(normalizedBounds.minX, widthPx, "min"),
-        toPixelAdjustmentValue(normalizedBounds.maxY - 1, heightPx, "max"),
-        toPixelAdjustmentValue(normalizedBounds.maxX - 1, widthPx, "max")
+        toPixelAdjustmentValue(normalizedBounds.maxY, heightPx, "max"),
+        toPixelAdjustmentValue(normalizedBounds.maxX, widthPx, "max")
     ];
 }
 
-function toPixelAdjustmentValue(normalizedDelta, pixelSize, mode) {
-    var delta = Number(normalizedDelta);
-    var px = Math.round(Math.abs(delta) * Number(pixelSize));
-    if (!isFinite(delta) || !isFinite(px) || px <= 0) {
+function toPixelAdjustmentValue(normalizedBoundary, pixelSize, mode) {
+    var boundary = Math.round(Number(normalizedBoundary) * Number(pixelSize));
+    var size = Math.round(Number(pixelSize));
+    if (!isFinite(boundary) || !isFinite(size) || size < 1) {
         return 0;
     }
     if (mode === "min") {
-        return delta < 0 ? px : "g" + px;
+        if (boundary < 0) return -boundary;
+        return boundary > 0 ? "g" + boundary : 0;
     }
-    return delta > 0 ? px : "g" + px;
+    if (boundary > size) return boundary - size;
+    return boundary < size ? "g" + (size - boundary) : 0;
 }
 
 function parseBridgeTalkResponse(responseText) {
     return parseJsonResponse(responseText);
-}
-
-function showMatchedLinkInInDesign(selectedCandidate) {
-    if (!selectedCandidate) {
-        return;
-    }
-    var inDesignFunction = function(request) {
-        /*__INJECT_TO_NFC_JA__*/
-        var targetPath = request && request.targetPath ? String(request.targetPath) : "";
-        var directLinkIndex = Number(request && request.linkIndex);
-        var decodedRawPath = _decodePathRaw(targetPath);
-        var decodedNormPath = _decodeAndNormalizePath(targetPath);
-        if (app.documents.length === 0) {
-            return "null";
-        }
-        function fitSelection(win) {
-            try {
-                var fitSelectionAction = app.menuActions.itemByName("$ID/Fit Selection in Window");
-                if (fitSelectionAction && fitSelectionAction.isValid) {
-                    fitSelectionAction.invoke();
-                    return true;
-                }
-            } catch (_menuError) {}
-            try {
-                win.zoom(ZoomOptions.FIT_SPREAD);
-                return true;
-            } catch (_spreadError) {}
-            return false;
-        }
-        var doc = app.activeDocument;
-        var links = doc.links;
-        var win = doc.layoutWindows.length > 0 ? doc.layoutWindows[0] : null;
-        if (!win) {
-            return "null";
-        }
-        var selectedItem = null;
-        if (isFinite(directLinkIndex) && directLinkIndex >= 0 && directLinkIndex < links.length) {
-            try {
-                selectedItem = links[Math.floor(directLinkIndex)].parent;
-            } catch (_directLinkError) {
-                selectedItem = null;
-            }
-        }
-        for (var idx = 0; idx < links.length; idx++) {
-            if (selectedItem) {
-                break;
-            }
-            var link = links[idx];
-            if (!_matchLinkPath(link.filePath, decodedRawPath, decodedNormPath)) {
-                continue;
-            }
-            selectedItem = link.parent;
-        }
-        if (!selectedItem) {
-            return "null";
-        }
-        if (selectedItem.parentPage) {
-            win.activePage = selectedItem.parentPage;
-        }
-        selectedItem.select();
-        fitSelection(win);
-        return "ok";
-    };
-    sendBridgeTalkNoWait("indesign", buildBridgeTalkInvocationBody(inDesignFunction, {
-        targetPath: encodeURIComponent(String(selectedCandidate.rawFilePath || "")),
-        linkIndex: selectedCandidate.linkIndex
-    }));
-    try {
-        BridgeTalk.bringToFront("indesign");
-    } catch (_bringToFrontError) {}
-}
-
-function normalizeDisplaySlashes(text, separator) {
-    var value = String(text || "");
-    var normalized = "";
-    var lastWasSeparator = false;
-    var slashChar = separator || "/";
-    for (var i = 0; i < value.length; i++) {
-        var ch = value.charAt(i);
-        var isSeparator = (ch === "/") || (ch === "\\") || (ch === "¥") || (ch === "￥") || (ch === "＼");
-        if (isSeparator) {
-            if (!lastWasSeparator) {
-                normalized += slashChar;
-                lastWasSeparator = true;
-            }
-        } else {
-            normalized += ch;
-            lastWasSeparator = false;
-        }
-    }
-    return normalized;
-}
-
-function buildDisplayPathForUI(pathText) {
-    var value = String(pathText || "");
-    var isWindows = $.os.indexOf("Windows") >= 0;
-    try {
-        value = decodeURI(value);
-    } catch (_decodeError) {}
-    if (isWindows) {
-        value = normalizeDisplaySlashes(value, "/");
-        value = value.split("/").join("\\");
-    } else {
-        value = value.split("\\ ").join(" ");
-    }
-    return value;
-}
-
-function buildNameOnlyMessageLine1(hasFolderDifference, hasExtensionDifference) {
-    if (hasFolderDifference && hasExtensionDifference) {
-        return localText("拡張子とパスが異なる画像がありました。", "An image with a different extension and path was found.");
-    }
-    if (hasExtensionDifference) {
-        return localText("拡張子が異なる画像がありました。", "An image with a different extension was found.");
-    }
-    if (hasFolderDifference) {
-        return localText("パスが異なる画像がありました。", "An image with a different path was found.");
-    }
-    return localText("同じ名前の画像が見つかりました。", "An image with the same name was found.");
-}
-
-function decodeUriSafeText(text) {
-    var value = String(text || "");
-    try {
-        return decodeURI(value);
-    } catch (_decodeError) {}
-    return value;
-}
-
-function findLastPathSeparatorIndex(pathText) {
-    var value = String(pathText || "");
-    return Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
-}
-
-function splitPathTextForDisplay(pathText, fallbackFileName) {
-    var value = buildDisplayPathForUI(pathText);
-    var fallbackName = buildDisplayPathForUI(fallbackFileName);
-    var slashIndex = findLastPathSeparatorIndex(value);
-    if (slashIndex >= 0) {
-        return {
-            fileName: value.substring(slashIndex + 1) || fallbackName,
-            folderPath: value.substring(0, slashIndex)
-        };
-    }
-    return {
-        fileName: fallbackName || value,
-        folderPath: value && fallbackName && value !== fallbackName ? value : ""
-    };
-}
-
-function addDialogLabeledTextRow(parent, labelText, valueText, labelWidth, valueWidth) {
-    var row = parent.add("group");
-    row.orientation = "row";
-    row.alignChildren = ["left", "center"];
-    row.spacing = 0;
-    var label = row.add("statictext", undefined, labelText);
-    label.minimumSize.width = labelWidth;
-    label.maximumSize.width = labelWidth;
-    var value = row.add("statictext", undefined, valueText);
-    value.minimumSize.width = valueWidth;
-    return { row: row, label: label, value: value };
-}
-
-function createFallbackLinkDialog() {
-    var dialog = new Window("dialog", localText("リンク確認", "Confirm Link"));
-    dialog.orientation = "column";
-    dialog.alignChildren = ["fill", "top"];
-    dialog.spacing = 10;
-    dialog.margins = 16;
-    return dialog;
-}
-
-function addFallbackDialogHeader(dialog, hasFolderDifference, hasExtensionDifference) {
-    var line1 = dialog.add("statictext", undefined, localText("完全に一致するリンクがありません。", "No exact matching link was found."));
-    line1.minimumSize.width = 360;
-    var line1Detail = dialog.add("statictext", undefined, buildNameOnlyMessageLine1(hasFolderDifference, hasExtensionDifference));
-    line1Detail.minimumSize.width = 360;
-    return {
-        line1: line1,
-        line1Detail: line1Detail
-    };
-}
-
-function addFallbackDialogInfoPanel(dialog, title, info, labelWidth, valueWidth) {
-    var panel = dialog.add("panel", undefined, title);
-    panel.orientation = "column";
-    panel.alignChildren = ["fill", "top"];
-    panel.margins = 12;
-    addDialogLabeledTextRow(panel, localText("ファイル名：", "File name: "), info.fileName, labelWidth, valueWidth);
-    addDialogLabeledTextRow(panel, localText("パス名：", "Path: "), info.folderPath, labelWidth, valueWidth);
-    return panel;
-}
-
-function buildFallbackDialogLinkInfo(options) {
-    if (options.linkPath) {
-        return splitPathTextForDisplay(options.linkPath, options.linkFileName);
-    }
-    return {
-        fileName: buildDisplayPathForUI(options.linkFileName),
-        folderPath: buildDisplayPathForUI(options.linkFolderPath)
-    };
-}
-
-function addFallbackDialogSingleItemSection(dialog, options) {
-    var labelWidth = 80;
-    var valueWidth = 360;
-    var photoshopInfo = splitPathTextForDisplay(options.photoshopPath, options.photoshopFileName);
-    var linkInfo = buildFallbackDialogLinkInfo(options);
-
-    addFallbackDialogInfoPanel(dialog, localText("Photoshop側", "Photoshop Side"), photoshopInfo, labelWidth, valueWidth);
-    addFallbackDialogInfoPanel(dialog, localText("InDesign側", "InDesign Side"), linkInfo, labelWidth, valueWidth);
-
-    var line4 = dialog.add("statictext", undefined, localText("の情報を使用しますか？", "Use this information?"));
-    line4.minimumSize.width = 520;
-    return line4;
-}
-
-function addFallbackDialogButtons(dialog, isSingleItem) {
-    var buttonGroup = dialog.add("group");
-    buttonGroup.alignment = ["right", "center"];
-    var cancelButton = buttonGroup.add("button", undefined, localText("キャンセル", "Cancel"), { name: "cancel" });
-    var checkButton = buttonGroup.add("button", undefined, localText("InDesignで確認", "Check in InDesign"));
-    var useButton = null;
-    if (isSingleItem) {
-        useButton = buttonGroup.add("button", undefined, localText("これを使用", "Use This"), { name: "ok" });
-        dialog.defaultElement = useButton;
-    } else {
-        dialog.defaultElement = checkButton;
-    }
-    dialog.cancelElement = cancelButton;
-    return {
-        cancelButton: cancelButton,
-        checkButton: checkButton,
-        useButton: useButton
-    };
-}
-
-function bindFallbackDialogButtons(dialog, buttons) {
-    buttons.cancelButton.onClick = function() { dialog.close(0); };
-    buttons.checkButton.onClick = function() { dialog.close(2); };
-    if (buttons.useButton) {
-        buttons.useButton.onClick = function() { dialog.close(1); };
-    }
-}
-
-function resolveFallbackDialogResult(dialogResult) {
-    if (dialogResult === 1) return "use";
-    if (dialogResult === 2) return "check";
-    return "cancel";
-}
-
-function showFallbackLinkConfirmDialog(options) {
-    activatePhotoshop();
-    var items = (options && options.items && options.items.length) ? options.items : [];
-    var isSingleItem = items.length === 1;
-    var photoshopFileName = String((options && options.photoshopFileName) || "");
-    var photoshopPath = String((options && options.photoshopPath) || "");
-    var hasFolderDifference = !!(options && options.hasFolderDifference);
-    var hasExtensionDifference = !!(options && options.hasExtensionDifference);
-    var dialog = createFallbackLinkDialog();
-    addFallbackDialogHeader(dialog, hasFolderDifference, hasExtensionDifference);
-
-    if (isSingleItem) {
-        var singleItem = items[0];
-        addFallbackDialogSingleItemSection(dialog, {
-            photoshopFileName: photoshopFileName,
-            photoshopPath: photoshopPath,
-            linkFileName: singleItem && (singleItem.rawFileName || singleItem.linkName || ""),
-            linkPath: singleItem && (singleItem.rawFilePath || ""),
-            linkFolderPath: singleItem && (singleItem.rawFolderPath || singleItem.folderPath || "")
-        });
-    }
-
-    var buttons = addFallbackDialogButtons(dialog, isSingleItem);
-    bindFallbackDialogButtons(dialog, buttons);
-
-    try { dialog.center(); } catch (_centerError) {}
-
-    var dialogResult = dialog.show();
-    if (dialogResult === 1 || dialogResult === 2) {
-        try { app.refresh(); } catch (_refreshError) {}
-    }
-    return resolveFallbackDialogResult(dialogResult);
 }
 
 function buildBridgeTalkInvocationBody(inDesignFunction, requestData) {
@@ -3678,49 +2931,11 @@ function buildBridgeTalkInvocationBody(inDesignFunction, requestData) {
     return "(" + injected + ")(" + toSourceLiteral(requestData || {}) + ");";
 }
 
-function sendBridgeTalkAndWait(target, body, timeoutMs) {
-    var bridgeTalk = new BridgeTalk();
-    var responseBody = null;
-    var errorBody = null;
-    bridgeTalk.target = target;
-    bridgeTalk.body = body;
-    bridgeTalk.onResult = function(response) {
-        responseBody = response.body;
-    };
-    bridgeTalk.onError = function(err) {
-        errorBody = buildBridgeTalkErrorResponse(err);
-    };
-    bridgeTalk.send();
-
-    return waitForBridgeTalkResponse(function() {
-        if (responseBody !== null) {
-            return responseBody;
-        }
-        if (errorBody !== null) {
-            return errorBody;
-        }
-        return null;
-    }, timeoutMs);
-}
-
-function sendBridgeTalkNoWait(target, body) {
-    var bridgeTalk = new BridgeTalk();
-    bridgeTalk.target = target;
-    bridgeTalk.body = body;
-    bridgeTalk.send();
-}
-
-// ───────────────────────────────────────────────────────────
-// InDesignをBridgeTalkで呼び出す（同期待機）
-function sendToInDesign(encodedPath, targetFileName) {
+function sendToInDesign(placementSession) {
     // InDesign側で実行する関数（InDesignコンテキスト）
     var inDesignFunction = function(request) {
-            var isWindows = $.os.indexOf("Windows") >= 0;
             /*__INJECT_TO_NFC_JA__*/
-            var encodedKey = request && request.encodedKey ? String(request.encodedKey) : "";
-            var targetFileNameText = request && request.targetFileNameText ? String(request.targetFileNameText) : "";
-            var decodedRawKey = _decodePathRaw(encodedKey);
-            var decodedNormKey = _decodeAndNormalizePath(encodedKey);
+            var placement = request && request.placement ? request.placement : {};
 
             if (app.documents.length === 0) {
                 return toSourceLiteral({
@@ -3729,9 +2944,18 @@ function sendToInDesign(encodedPath, targetFileName) {
                 });
             }
 
+            var selectedPlacement = null;
+            try {
+                selectedPlacement = resolveSelectedPlacement(placement);
+            } catch (placementError) {
+                return toSourceLiteral(buildErrorResponse(String(placementError)));
+            }
+            var targetDocument = selectedPlacement.document;
+            var targetLink = selectedPlacement.link;
+
             // 環境復元のため退避
             var origUnit = app.scriptPreferences.measurementUnit;
-            var origOrigin = app.activeDocument.viewPreferences.rulerOrigin;
+            var origOrigin = targetDocument.viewPreferences.rulerOrigin;
             try {
                 return toSourceLiteral(runCropSelection());
             } catch (e) {
@@ -3742,7 +2966,7 @@ function sendToInDesign(encodedPath, targetFileName) {
                     app.scriptPreferences.measurementUnit = origUnit;
                 } catch (_) {}
                 try {
-                    app.activeDocument.viewPreferences.rulerOrigin = origOrigin;
+                    targetDocument.viewPreferences.rulerOrigin = origOrigin;
                 } catch (_) {}
             }
 
@@ -3751,91 +2975,152 @@ function sendToInDesign(encodedPath, targetFileName) {
                 if (measurementError) {
                     return buildErrorResponse(measurementError);
                 }
-                var matchingResult = collectMatchingResult();
-                if (matchingResult.errorMessage) {
-                    return buildErrorResponse(matchingResult.errorMessage);
-                }
-
-                var candidates = prepareMatchingCandidates(matchingResult);
-                if (!candidates) {
-                    return buildLinkNotFoundResponse();
-                }
-
-                return buildSelectionResponse(candidates, matchingResult);
-            }
-
-            function collectMatchingResult() {
-                return collectMatchingLinks(app.activeDocument.links, createLinkMatchContext(decodedRawKey, decodedNormKey));
+                var selected = serializeCandidate(buildCandidate({
+                    link: targetLink,
+                    linkIndex: findCurrentLinkIndex(targetDocument, targetLink)
+                }, 0));
+                return {
+                    status: "ok",
+                    matchType: placement.matchType === "nameOnly" ? "nameOnly" : "exact",
+                    hasFolderDifference: !!placement.hasFolderDifference,
+                    hasExtensionDifference: !!placement.hasExtensionDifference,
+                    matchCount: 1,
+                    selectedIndex: 0,
+                    selected: selected,
+                    normalizedFrameBounds: selected.normalizedFrameBounds
+                };
             }
 
             function ensureInDesignMeasurementContext() {
                 app.scriptPreferences.measurementUnit = MeasurementUnits.MILLIMETERS;
-                app.activeDocument.viewPreferences.rulerOrigin = RulerOrigin.SPREAD_ORIGIN;
+                targetDocument.viewPreferences.rulerOrigin = RulerOrigin.SPREAD_ORIGIN;
                 if (app.scriptPreferences.measurementUnit !== MeasurementUnits.MILLIMETERS) {
                     return remoteText("単位設定に失敗しました（MILLIMETERS 以外）", "Failed to set units (not MILLIMETERS)");
                 }
                 return "";
             }
 
-            function createLinkMatchContext(rawKey, normKey) {
-                var targetRawPathInfo = buildNameOnlyPathInfo(rawKey, rawKey);
-                return {
-                    rawKey: rawKey,
-                    normKey: normKey,
-                    targetRawPathInfo: targetRawPathInfo,
-                    targetFileNameInfo: splitFileNameInfo(targetFileNameText || targetRawPathInfo.fileName),
-                    targetPathInfo: buildNameOnlyPathInfo(normKey, rawKey)
-                };
-            }
-
-            function prepareMatchingCandidates(matchingResult) {
-                if (!matchingResult.links.length) {
+            function getValidItemById(collection, id) {
+                var numericId = Number(id);
+                if (!isFinite(numericId)) return null;
+                try {
+                    var item = collection.itemByID(numericId);
+                    return item && item.isValid !== false ? item : null;
+                } catch (_itemByIdError) {
                     return null;
                 }
-                return prepareCandidates(matchingResult.links);
             }
 
-            function buildSelectionResponse(candidates, matchingResult) {
-                if (candidates.length === 1) {
-                    return buildSuccessResponse(candidates, serializeCandidate(candidates[0]), matchingResult);
+            function getDocumentPath(document) {
+                try {
+                    return String(document.fullName.fsName || document.fullName || "");
+                } catch (_documentPathError) {
+                    return "";
                 }
-                return buildCandidateListResponse(candidates, matchingResult);
             }
 
-            // 応答生成
-            function buildSuccessResponse(candidates, selected, matchingResult) {
-                var response = buildMatchResponseBase(matchingResult);
-                response.status = "ok";
-                response.matchCount = candidates.length;
-                response.selectedIndex = selected.index;
-                response.selected = selected;
-                response.normalizedFrameBounds = selected.normalizedFrameBounds;
-                return response;
-            }
-
-            function buildCandidateListResponse(candidates, matchingResult) {
-                var response = buildMatchResponseBase(matchingResult);
-                response.status = "ok";
-                response.matchCount = candidates.length;
-                response.candidates = serializeCandidates(candidates);
-                return response;
-            }
-
-            function buildMatchResponseBase(matchingResult) {
+            function resolveSelectedPlacement(session) {
+                var document = getValidItemById(app.documents, session.documentId);
+                if (!document) {
+                    throw new Error(remoteText(
+                        "選択したInDesignドキュメントが開かれていません。",
+                        "The selected InDesign document is no longer open."
+                    ));
+                }
+                if (session.documentPath && _normPath(getDocumentPath(document)) !== _normPath(String(session.documentPath))) {
+                    throw new Error(remoteText(
+                        "選択したInDesignドキュメントが変更されています。",
+                        "The selected InDesign document has changed."
+                    ));
+                }
+                var link = getValidItemById(document.links, session.linkId);
+                if (!link) {
+                    throw new Error(remoteText(
+                        "選択したリンクが見つかりません。",
+                        "The selected link no longer exists."
+                    ));
+                }
+                if (link.status !== LinkStatus.NORMAL) {
+                    throw new Error(remoteText(
+                        "選択したリンクが更新されていません。",
+                        "The selected link is not up to date."
+                    ));
+                }
+                if (session.rawFilePath && _normPath(String(link.filePath || "")) !== _normPath(String(session.rawFilePath))) {
+                    throw new Error(remoteText(
+                        "選択したリンク先が変更されています。",
+                        "The selected link target has changed."
+                    ));
+                }
+                var graphicItem = link.parent;
+                if (session.itemId != null && Number(graphicItem.id) !== Number(session.itemId)) {
+                    throw new Error(remoteText(
+                        "選択した配置画像が変更されています。",
+                        "The selected placed graphic has changed."
+                    ));
+                }
+                var frameItem = getFrameContainer(graphicItem);
+                if (session.frameId != null && Number(frameItem.id) !== Number(session.frameId)) {
+                    throw new Error(remoteText(
+                        "選択した配置フレームが変更されています。",
+                        "The selected placement frame has changed."
+                    ));
+                }
+                if (!session.geometryFingerprint ||
+                        !placementGeometryMatches(session.geometryFingerprint, buildPlacementGeometryFingerprint(graphicItem, frameItem))) {
+                    throw new Error(remoteText(
+                        "選択した配置画像またはフレームの位置・変形が変更されています。",
+                        "The selected graphic or frame geometry has changed."
+                    ));
+                }
                 return {
-                    status: "ok",
-                    matchType: matchingResult.matchType,
-                    hasFolderDifference: matchingResult.hasFolderDifference,
-                    hasExtensionDifference: matchingResult.hasExtensionDifference
+                    document: document,
+                    link: link,
+                    graphicItem: graphicItem,
+                    frameItem: frameItem
                 };
             }
 
-            function serializeCandidates(candidates) {
-                var serialized = [];
-                for (var idx = 0; idx < candidates.length; idx++) {
-                    serialized.push(serializeCandidate(candidates[idx]));
+            function buildPlacementGeometryFingerprint(graphicItem, frameItem) {
+                function buildQuad(item) {
+                    return [
+                        resolvePoint(item, AnchorPoint.TOP_LEFT_ANCHOR, CoordinateSpaces.SPREAD_COORDINATES),
+                        resolvePoint(item, AnchorPoint.TOP_RIGHT_ANCHOR, CoordinateSpaces.SPREAD_COORDINATES),
+                        resolvePoint(item, AnchorPoint.BOTTOM_RIGHT_ANCHOR, CoordinateSpaces.SPREAD_COORDINATES),
+                        resolvePoint(item, AnchorPoint.BOTTOM_LEFT_ANCHOR, CoordinateSpaces.SPREAD_COORDINATES)
+                    ];
                 }
-                return serialized;
+                return {
+                    graphicQuad: buildQuad(graphicItem),
+                    frameQuad: buildQuad(frameItem)
+                };
+            }
+
+            function placementGeometryMatches(expected, actual) {
+                function quadsMatch(expectedQuad, actualQuad) {
+                    if (!expectedQuad || !actualQuad || expectedQuad.length !== 4 || actualQuad.length !== 4) return false;
+                    for (var pointIndex = 0; pointIndex < 4; pointIndex++) {
+                        if (!expectedQuad[pointIndex] || !actualQuad[pointIndex] ||
+                                Math.abs(Number(expectedQuad[pointIndex][0]) - Number(actualQuad[pointIndex][0])) > 0.0001 ||
+                                Math.abs(Number(expectedQuad[pointIndex][1]) - Number(actualQuad[pointIndex][1])) > 0.0001) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }
+                return !!expected && !!actual &&
+                    quadsMatch(expected.graphicQuad, actual.graphicQuad) &&
+                    quadsMatch(expected.frameQuad, actual.frameQuad);
+            }
+
+            function findCurrentLinkIndex(document, link) {
+                var targetId = Number(link.id);
+                for (var linkIndex = 0; linkIndex < document.links.length; linkIndex++) {
+                    try {
+                        if (Number(document.links[linkIndex].id) === targetId) return linkIndex;
+                    } catch (_linkIndexError) {}
+                }
+                return -1;
             }
 
             function buildErrorResponse(message) {
@@ -3845,286 +3130,28 @@ function sendToInDesign(encodedPath, targetFileName) {
                 };
             }
 
-            function buildLinkNotFoundResponse() {
-                return buildErrorResponse(remoteText("この画像はInDesignドキュメント中に存在しません。", "This image does not exist in the InDesign document."));
-            }
-
             // 基本ユーティリティ
             function getNumber(value) {
                 var num = Number(value);
                 return isNaN(num) ? 0 : num;
             }
 
-            function normalizePathSeparatorsForSplit(pathText) {
-                return String(pathText || "").replace(new RegExp("[/\\\\\\u00A5\\uFFE5\\uFF3C]+", "g"), "\\");
-            }
-
-            function containsPathSeparator(text) {
-                return new RegExp("[/\\\\\\u00A5\\uFFE5\\uFF3C]").test(String(text || ""));
-            }
-
-            function splitPathInfo(filePath) {
-                var normalizedPath = normalizePathSeparatorsForSplit(filePath);
-                var slashIndex = normalizedPath.lastIndexOf("\\");
-                var folderPath = (slashIndex >= 0) ? normalizedPath.substring(0, slashIndex) : "";
-                var fileName = (slashIndex >= 0) ? normalizedPath.substring(slashIndex + 1) : normalizedPath;
-                var fileNameParts = splitFileNameParts(fileName);
-                if (isWindows) {
-                    folderPath = folderPath.toLowerCase();
-                    fileNameParts = splitFileNameParts(fileName.toLowerCase());
-                }
-                return {
-                    folderPath: folderPath,
-                    fileName: fileNameParts.fileName,
-                    baseName: fileNameParts.baseName,
-                    extension: fileNameParts.extension
-                };
-            }
-
-            function splitFileNameInfo(fileName) {
-                var normalizedFileName = decodeUriSafeText(fileName);
-                normalizedFileName = String(normalizedFileName || "");
-                if (containsPathSeparator(normalizedFileName)) {
-                    normalizedFileName = splitPathInfo(normalizedFileName).fileName;
-                }
-                if (isWindows) {
-                    normalizedFileName = normalizedFileName.toLowerCase();
-                }
-                return splitFileNameParts(normalizedFileName);
-            }
-
-            function splitFileNameParts(fileName) {
-                var normalizedFileName = String(fileName || "");
-                var dotIndex = normalizedFileName.lastIndexOf(".");
-                return {
-                    fileName: normalizedFileName,
-                    baseName: (dotIndex > 0) ? normalizedFileName.substring(0, dotIndex) : normalizedFileName,
-                    extension: (dotIndex > 0) ? normalizedFileName.substring(dotIndex + 1) : ""
-                };
-            }
-
-            function buildNameOnlyPathInfo(normalizedPath, rawPath) {
-                var pathInfo = splitPathInfo(normalizedPath);
-                var rawValue = decodeUriSafeText(rawPath);
-                var fallbackPathInfo = splitPathInfo(rawValue);
-                var splitLooksValid = !!pathInfo.baseName;
-                if (splitLooksValid && fallbackPathInfo.folderPath && !pathInfo.folderPath) {
-                    splitLooksValid = false;
-                }
-                if (splitLooksValid && containsPathSeparator(pathInfo.fileName)) {
-                    splitLooksValid = false;
-                }
-                return splitLooksValid ? pathInfo : fallbackPathInfo;
-            }
-
-            // リンク探索
-            function collectMatchingLinks(links, context) {
-                var exactResult = collectExactLinks(links, context);
-
-                if (exactResult.errorMessage || exactResult.links.length > 0) {
-                    return exactResult;
-                }
-
-                return collectNameOnlyLinks(links, context);
-            }
-
-            function collectExactLinks(links, context) {
-                var rawExactLinks = [];
-                for (var idx = 0; idx < links.length; idx++) {
-                    var link = links[idx];
-                    if (!isRawExactMatchingLink(link, context.rawKey)) {
-                        continue;
-                    }
-                    rawExactLinks.push(buildMatchingLinkEntry(link, idx));
-                }
-                if (rawExactLinks.length) {
-                    return buildReadyMatchResult(rawExactLinks, "exact", false, false);
-                }
-
-                var normalizedExactLinks = [];
-                for (var normIdx = 0; normIdx < links.length; normIdx++) {
-                    var normLink = links[normIdx];
-                    if (!isNameOnlyMatchingLink(normLink, context.targetFileNameInfo)) {
-                        continue;
-                    }
-                    if (!isExactMatchingLink(normLink, context.rawKey, context.normKey)) {
-                        continue;
-                    }
-                    normalizedExactLinks.push(buildMatchingLinkEntry(normLink, normIdx));
-                }
-                return buildReadyMatchResult(normalizedExactLinks, "exact", false, false);
-            }
-
-            function collectNameOnlyLinks(links, context) {
-                var nameOnlyLinks = [];
-                var hasFolderDifference = false;
-                var hasExtensionDifference = false;
-                var skippedNotReady = false;
-                for (var nameIdx = 0; nameIdx < links.length; nameIdx++) {
-                    var nameLink = links[nameIdx];
-                    if (!isNameOnlyMatchingLink(nameLink, context.targetFileNameInfo)) {
-                        continue;
-                    }
-                    if (!isLinkReady(nameLink)) {
-                        skippedNotReady = true;
-                        continue;
-                    }
-                    var differences = collectNameOnlyDifferences(nameLink, context);
-                    hasFolderDifference = hasFolderDifference || differences.hasFolderDifference;
-                    hasExtensionDifference = hasExtensionDifference || differences.hasExtensionDifference;
-                    nameOnlyLinks.push(buildMatchingLinkEntry(nameLink, nameIdx));
-                }
-
-                if (!nameOnlyLinks.length && skippedNotReady) {
-                    return buildLinkStatusError("nameOnly", false, false);
-                }
-                return buildMatchResult(nameOnlyLinks, "nameOnly", hasFolderDifference, hasExtensionDifference);
-            }
-
-            function collectNameOnlyDifferences(link, context) {
-                var linkPathInfo = buildNameOnlyPathInfo(link.filePath || link.name || "", link.filePath || link.name || "");
-                var linkFileInfo = splitFileNameInfo(link.name || link.filePath || "");
-                return {
-                    hasFolderDifference: context.targetPathInfo.folderPath !== linkPathInfo.folderPath,
-                    hasExtensionDifference: context.targetFileNameInfo.extension !== linkFileInfo.extension
-                };
-            }
-
-            function buildMatchingLinkEntry(link, linkIndex) {
-                return {
-                    link: link,
-                    linkIndex: linkIndex
-                };
-            }
-
-            function buildMatchResult(links, matchType, hasFolderDifference, hasExtensionDifference) {
-                return {
-                    links: links,
-                    matchType: (matchType === "nameOnly" && links.length > 0) ? "nameOnly" : "exact",
-                    hasFolderDifference: hasFolderDifference,
-                    hasExtensionDifference: hasExtensionDifference,
-                    errorMessage: ""
-                };
-            }
-
-            function buildReadyMatchResult(linkEntries, matchType, hasFolderDifference, hasExtensionDifference) {
-                for (var readyIndex = 0; readyIndex < linkEntries.length; readyIndex++) {
-                    if (!isLinkReady(linkEntries[readyIndex].link)) {
-                        return buildLinkStatusError(matchType, hasFolderDifference, hasExtensionDifference);
-                    }
-                }
-                return buildMatchResult(linkEntries, matchType, hasFolderDifference, hasExtensionDifference);
-            }
-
-            function buildLinkStatusError(matchType, hasFolderDifference, hasExtensionDifference) {
-                return {
-                    links: [],
-                    matchType: matchType,
-                    hasFolderDifference: hasFolderDifference,
-                    hasExtensionDifference: hasExtensionDifference,
-                    errorMessage: remoteText("リンクが更新されていないため、正確な拡大率を取得できません。\nInDesignでリンクパネルを確認してください。", "The link is not updated, so the accurate scale cannot be read.\nCheck the Links panel in InDesign.")
-                };
-            }
-
-            function isLinkReady(link) {
-                return link.status === LinkStatus.NORMAL;
-            }
-
-            function isRawExactMatchingLink(link, rawKey) {
-                return String(link.filePath || "") === String(rawKey || "");
-            }
-
-            function isExactMatchingLink(link, rawKey, normKey) {
-                return _matchLinkPath(link.filePath, rawKey, normKey);
-            }
-
-            function isNameOnlyMatchingLink(link, targetFileNameInfo) {
-                if (!targetFileNameInfo.baseName) {
-                    return false;
-                }
-                var linkFileInfo = splitFileNameInfo(link.name || link.filePath || "");
-                return !!(linkFileInfo.baseName && linkFileInfo.baseName === targetFileNameInfo.baseName);
-            }
-
-            function toNumberArray(values) {
-                var result = [];
-                for (var idx = 0; idx < values.length; idx++) {
-                    result.push(getNumber(values[idx]));
-                }
-                return result;
-            }
-
-            // 候補生成
-            function buildCandidates(matchingLinks) {
-                var list = [];
-                for (var idx = 0; idx < matchingLinks.length; idx++) {
-                    list.push(buildCandidate(matchingLinks[idx], idx));
-                }
-                return list;
-            }
-
-            function prepareCandidates(matchingLinks) {
-                var candidates = buildCandidates(matchingLinks);
-                sortCandidates(candidates);
-                updateCandidateLabels(candidates);
-                return candidates;
-            }
-
             function buildCandidate(linkEntry, index) {
                 var link = linkEntry.link;
-                var itemContext = collectCandidateItemContext(link);
-                var metrics = collectCandidateMetrics(itemContext.item, itemContext.parentItem);
-                var geometry = buildCandidateGeometry(itemContext.item, itemContext.parentItem);
-                var linkInfo = collectCandidateLinkInfo(linkEntry, link);
+                var item = link.parent;
+                var parentItem = getFrameContainer(item);
+                var geometry = buildCandidateGeometry(item, parentItem);
 
                 return {
                     index: index,
-                    linkIndex: linkInfo.linkIndex,
-                    pageName: metrics.pageName,
-                    linkName: linkInfo.linkName,
-                    rawFileName: linkInfo.rawFileName,
-                    rawFilePath: linkInfo.rawFilePath,
-                    rawFolderPath: linkInfo.rawFolderPath,
-                    hScale: metrics.hScale,
-                    vScale: metrics.vScale,
-                    itemBounds: metrics.itemBounds,
-                    parentBounds: metrics.parentBounds,
-                    frameWidthMM: metrics.frameWidthMM,
-                    frameHeightMM: metrics.frameHeightMM,
-                    sortScale: metrics.sortScale,
-                    frameLocalBounds: geometry.frameLocalBounds,
-                    normalizedFrameBounds: geometry.normalizedFrameBounds,
-                    targetQuadInFrame: geometry.targetQuadInFrame,
-                    replacementData: geometry.replacementData,
-                    label: "",
-                    _itemRef: itemContext.item,
-                    _frameRef: itemContext.parentItem
-                };
-            }
-
-            function collectCandidateItemContext(link) {
-                var item = link.parent;
-                return {
-                    item: item,
-                    parentItem: getFrameContainer(item)
-                };
-            }
-
-            function collectCandidateLinkInfo(linkEntry, link) {
-                var linkPath = String(link.filePath || "");
-                return {
                     linkIndex: linkEntry.linkIndex,
-                    linkName: link.name,
-                    rawFileName: String(link.name || ""),
-                    rawFilePath: linkPath,
-                    rawFolderPath: getFolderPathFromFilePath(linkPath)
+                    documentId: Number(targetDocument.id),
+                    linkId: Number(link.id),
+                    itemId: Number(item.id),
+                    frameId: Number(parentItem.id),
+                    normalizedFrameBounds: geometry.normalizedFrameBounds,
+                    replacementData: geometry.replacementData
                 };
-            }
-
-            function getFolderPathFromFilePath(filePath) {
-                var value = String(filePath || "");
-                var lastSlashIndex = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
-                return (lastSlashIndex >= 0) ? value.substring(0, lastSlashIndex) : "";
             }
 
             function getFrameContainer(item) {
@@ -4144,59 +3171,6 @@ function sendToInDesign(encodedPath, targetFileName) {
                 }
             }
 
-            function collectCandidateMetrics(item, parentItem) {
-                var hScale = getNumber(item.horizontalScale);
-                var vScale = getNumber(item.verticalScale);
-                var parentBounds = toNumberArray(parentItem.geometricBounds);
-
-                return {
-                    pageName: getPageName(item),
-                    hScale: hScale,
-                    vScale: vScale,
-                    itemBounds: toNumberArray(item.geometricBounds),
-                    parentBounds: parentBounds,
-                    frameWidthMM: Math.abs(parentBounds[3] - parentBounds[1]),
-                    frameHeightMM: Math.abs(parentBounds[2] - parentBounds[0]),
-                    sortScale: Math.max(hScale, vScale)
-                };
-            }
-
-            function getPageName(item) {
-                try {
-                    if (item.parentPage) {
-                        return item.parentPage.name;
-                    }
-                } catch (_pageError) {}
-                return remoteText("ペーストボード", "Pasteboard");
-            }
-
-            function zeroPad(value, digits) {
-                var text = String(value);
-                while (text.length < digits) {
-                    text = "0" + text;
-                }
-                return text;
-            }
-
-            function formatMM(value) {
-                return getNumber(value).toFixed(2);
-            }
-
-            function zeroPadPageName(pageName) {
-                var text = String(pageName).replace(/^\s+|\s+$/g, "");
-                var num = parseInt(text, 10);
-                if (!isNaN(num) && String(num) === text) {
-                    return zeroPad(num, 3);
-                }
-                return text;
-            }
-
-            function makeCandidateLabel(order, pageName, frameWidthMM, frameHeightMM) {
-                var orderLabel = zeroPad(order, 2);
-                return orderLabel + remoteText("：", ": ") + zeroPadPageName(pageName) + remoteText("ページ（", " page (") +
-                    formatMM(frameWidthMM) + "mm × " + formatMM(frameHeightMM) + remoteText("mm）", "mm)");
-            }
-
             // 座標計算
             function buildCandidateGeometry(item, parentItem) {
                 var imageGeometry = getRectangleGeometry(item);
@@ -4205,9 +3179,7 @@ function sendToInDesign(encodedPath, targetFileName) {
                 var localFrameBounds = getProjectedImageBounds(framePoints, imageGeometry);
 
                 return {
-                    frameLocalBounds: localFrameBounds,
                     normalizedFrameBounds: buildNormalizedFrameBounds(localFrameBounds, imageGeometry),
-                    targetQuadInFrame: buildTargetQuadInFrame(localFrameBounds, imageGeometry, parentItem),
                     replacementData: buildReplacementData(localFrameBounds, imageGeometry, frameGeometry, item)
                 };
             }
@@ -4260,13 +3232,6 @@ function sendToInDesign(encodedPath, targetFileName) {
                 };
             }
 
-            function buildTargetQuadInFrame(localFrameBounds, imageGeometry, parentItem) {
-                var expandedLocalRect = getExpandedLocalRect(localFrameBounds, imageGeometry);
-                var targetQuadInSpread = localRectToSpreadQuad(expandedLocalRect, imageGeometry);
-                var frameGeometry = getFrameGeometry(parentItem);
-                return projectPoints(targetQuadInSpread, frameGeometry);
-            }
-
             function getRectangleGeometry(item) {
                 var pointSet = collectRectanglePointSet(item);
                 var corners = getImageCornerPoints(pointSet.spreadPoints, pointSet.pointIndexMap);
@@ -4291,15 +3256,6 @@ function sendToInDesign(encodedPath, targetFileName) {
                     right: Math.max(imageGeometry.width, localFrameBounds.maxX),
                     bottom: Math.max(imageGeometry.height, localFrameBounds.maxY)
                 };
-            }
-
-            function localRectToSpreadQuad(localRect, imageGeometry) {
-                return [
-                    localPointToSpreadPoint(localRect.left, localRect.top, imageGeometry),
-                    localPointToSpreadPoint(localRect.right, localRect.top, imageGeometry),
-                    localPointToSpreadPoint(localRect.right, localRect.bottom, imageGeometry),
-                    localPointToSpreadPoint(localRect.left, localRect.bottom, imageGeometry)
-                ];
             }
 
             function localPointToSpreadPoint(localX, localY, imageGeometry) {
@@ -4475,9 +3431,17 @@ function sendToInDesign(encodedPath, targetFileName) {
 
             function projectPoint(point, geometry) {
                 var delta = subtractPoints(point, geometry.topLeftSpread);
+                var determinant = geometry.axisX[0] * geometry.axisY[1] -
+                    geometry.axisX[1] * geometry.axisY[0];
+                if (Math.abs(determinant) < 0.0000000001) {
+                    throw new Error(remoteText(
+                        "配置画像の変形行列を逆変換できません。",
+                        "The placed image transform cannot be inverted."
+                    ));
+                }
                 return [
-                    dotProduct(delta, geometry.axisX),
-                    dotProduct(delta, geometry.axisY)
+                    (delta[0] * geometry.axisY[1] - delta[1] * geometry.axisY[0]) / determinant,
+                    (geometry.axisX[0] * delta[1] - geometry.axisX[1] * delta[0]) / determinant
                 ];
             }
 
@@ -4513,10 +3477,6 @@ function sendToInDesign(encodedPath, targetFileName) {
                 return [vector[0] / length, vector[1] / length];
             }
 
-            function dotProduct(a, b) {
-                return getNumber(a[0]) * getNumber(b[0]) + getNumber(a[1]) * getNumber(b[1]);
-            }
-
             function buildGeometryFromQuad(topLeftSpread, topRightSpread, bottomLeftSpread) {
                 var horizontalVector = subtractPoints(topRightSpread, topLeftSpread);
                 var verticalVector = subtractPoints(bottomLeftSpread, topLeftSpread);
@@ -4538,56 +3498,45 @@ function sendToInDesign(encodedPath, targetFileName) {
             }
 
 
-            // 候補整形
-            function sortCandidates(list) {
-                list.sort(function(a, b) {
-                    return a.sortScale - b.sortScale;
-                });
-            }
-
-            function updateCandidateLabels(list) {
-                for (var idx = 0; idx < list.length; idx++) {
-                    list[idx].label = makeCandidateLabel(idx + 1, list[idx].pageName, list[idx].frameWidthMM, list[idx].frameHeightMM);
-                }
-            }
-
             function serializeCandidate(candidate) {
-                var serialized = buildSerializedCandidateCore(candidate);
-                serialized.label = candidate.label;
-                return serialized;
-            }
-
-            function buildSerializedCandidateCore(candidate) {
                 return {
                     index: candidate.index,
                     linkIndex: candidate.linkIndex,
-                    pageName: candidate.pageName,
-                    linkName: candidate.linkName,
-                    rawFileName: candidate.rawFileName,
-                    rawFilePath: candidate.rawFilePath,
-                    rawFolderPath: candidate.rawFolderPath,
-                    hScale: candidate.hScale,
-                    vScale: candidate.vScale,
-                    itemBounds: candidate.itemBounds,
-                    parentBounds: candidate.parentBounds,
-                    frameWidthMM: candidate.frameWidthMM,
-                    frameHeightMM: candidate.frameHeightMM,
-                    sortScale: candidate.sortScale,
-                    frameLocalBounds: candidate.frameLocalBounds,
+                    documentId: candidate.documentId,
+                    linkId: candidate.linkId,
+                    itemId: candidate.itemId,
+                    frameId: candidate.frameId,
                     normalizedFrameBounds: candidate.normalizedFrameBounds,
-                    targetQuadInFrame: candidate.targetQuadInFrame,
                     replacementData: candidate.replacementData
                 };
             }
         };
 
-    return sendBridgeTalkAndWait("indesign", buildBridgeTalkBody(inDesignFunction, encodedPath, targetFileName), 300000);
+    var bridgeTarget = placementSession && placementSession.bridgeTarget
+        ? String(placementSession.bridgeTarget)
+        : "";
+    if (!bridgeTarget) {
+        return {
+            ok: false,
+            error: localText("対象のInDesignを確認できません。", "The target InDesign application could not be verified.")
+        };
+    }
+    try {
+        if (BridgeTalk.isRunning(bridgeTarget) !== true) {
+            return {
+                ok: false,
+                error: localText("対象のInDesignが終了しています。", "The target InDesign application is no longer running.")
+            };
+        }
+    } catch (runningError) {
+        return { ok: false, error: String(runningError) };
+    }
+    return sendBridgeTalkAndWait(bridgeTarget, buildBridgeTalkBody(inDesignFunction, placementSession), 300000);
 }
 
-function buildBridgeTalkBody(inDesignFunction, encodedPath, targetFileName) {
+function buildBridgeTalkBody(inDesignFunction, placementSession) {
     return buildBridgeTalkInvocationBody(inDesignFunction, {
-        encodedKey: encodedPath,
-        targetFileNameText: String(targetFileName || "")
+        placement: placementSession || {}
     });
 }
 
@@ -4595,39 +3544,13 @@ function buildInjectedInDesignFunctionSource(inDesignFunction) {
     return inDesignFunction.toString().replace(
         "/*__INJECT_TO_NFC_JA__*/",
         "var toNFCJa = " + NFC_HELPER_SRC + ";\n" +
-        "var normalizeDisplaySlashes = " + NORMALIZE_DISPLAY_SLASHES_SRC + ";\n" +
-        "var decodeUriSafeText = " + DECODE_URI_SAFE_TEXT_SRC + ";\n" +
         "var toSourceLiteral = " + TO_SOURCE_LITERAL_SRC + ";\n" +
         "var remoteLocaleCode = " + toSourceLiteral(currentLocaleCode()) + ";\n" +
         "function remoteText(jaText, enText) { return remoteLocaleCode === \"en\" ? enText : jaText; }\n" +
         "var _normPath = " + NORM_HELPER_SRC_ID + ";\n" +
-        "var _matchLinkPath = " + MATCH_LINK_HELPER_SRC + ";\n" +
-        "var _decodeAndNormalizePath = " + DECODE_NORM_HELPER_SRC + ";\n" +
-        "var _decodePathRaw = " + DECODE_RAW_HELPER_SRC + ";\n" +
         "var REPLACEMENT_DATA_VERSION = " + REPLACEMENT_DATA_VERSION + ";\n" +
         "var REPLACEMENT_DATA_UNIT = " + toSourceLiteral(REPLACEMENT_DATA_UNIT) + ";"
     );
-}
-
-function buildBridgeTalkErrorResponse(err) {
-    return toSourceLiteral({
-        status: "error",
-        message: localText("BridgeTalkエラー: ", "BridgeTalk error: ") + String(err && err.body ? err.body : "unknown")
-    });
-}
-
-function waitForBridgeTalkResponse(getResponse, timeoutMs) {
-    var start = new Date().getTime();
-    timeoutMs = timeoutMs || 300000;
-
-    while (getResponse() === null && (new Date().getTime() - start) < timeoutMs) {
-        try { BridgeTalk.pump(); } catch (_e) {}
-        $.sleep(50);
-    }
-
-    return getResponse() === null
-        ? toSourceLiteral({ status: "error", message: localText("InDesignから応答がありません（タイムアウト）", "No response from InDesign (timeout)") })
-        : getResponse();
 }
 
 function hasCanvasExpansion(expand) {
@@ -4690,8 +3613,24 @@ function parseAdjustmentValue(rawValue) {
 function addGuides(guides, guideItems) {
     for (var idx = 0; idx < guideItems.length; idx++) {
         var guide = guideItems[idx];
-        guides.add(guide.direction, UnitValue(guide.position, "px"));
+        if (!hasEquivalentGuide(guides, guide)) {
+            guides.add(guide.direction, UnitValue(guide.position, "px"));
+        }
     }
+}
+
+function hasEquivalentGuide(guides, candidate) {
+    var candidatePosition = Number(candidate.position);
+    for (var idx = 0; idx < guides.length; idx++) {
+        try {
+            var existing = guides[idx];
+            if (existing.direction === candidate.direction &&
+                    Math.abs(Number(existing.coordinate.as("px")) - candidatePosition) < 0.5) {
+                return true;
+            }
+        } catch (_guideReadError) {}
+    }
+    return false;
 }
 
 function parseJsonResponse(text) {
@@ -4741,26 +3680,18 @@ function extractJsonObjectText(text) {
     return text.substring(start, end + 1);
 }
 
-function activatePhotoshop() {
-    try {
-        BridgeTalk.bringToFront("photoshop");
-        return;
-    } catch (e) {}
-
-    try {
-        app.bringToFront();
-    } catch (e2) {}
-}
-
-
-function prepare(doc, preferredLinkIndex) {
-    var responseObject = requestCropDataFromInDesign(doc, preferredLinkIndex);
+function prepare(doc, placementSession) {
+    if (!doc) {
+        alert(localText("処理対象のPhotoshopドキュメントを確認できません。", "The target Photoshop document could not be verified."));
+        return null;
+    }
+    var responseObject = requestCropDataFromInDesign(placementSession);
     if (!responseObject) {
         alert(localText("InDesign応答の解析に失敗しました。", "Failed to parse the InDesign response."));
         return null;
     }
 
-    if (!handleInDesignResponse(responseObject, doc)) {
+    if (!handleInDesignResponse(responseObject)) {
         return null;
     }
 
@@ -4842,7 +3773,6 @@ function applyGuideAdjustmentsToDocument(doc, rawAdjustments, canvasWidth, canva
     var trim = sides.trim;
     expandCanvasForOperation(doc, expand, canvasWidth, canvasHeight);
 
-    doc.guides.removeAll();
     var guideItems = [];
     if (trim.top > 0) {
         guideItems.push({
@@ -4908,8 +3838,6 @@ function applyCropAdjustmentsToDocument(doc, rawAdjustments, canvasWidth, canvas
     var cropRight = expandedSize.width - trim.right;
     var cropBottom = expandedSize.height - trim.bottom;
 
-    doc.guides.removeAll();
-
     if (trim.top > 0 || trim.left > 0 || trim.bottom > 0 || trim.right > 0) {
         cropDocumentPixelsDestructively(
             cropLeft,
@@ -4973,37 +3901,6 @@ function writeMetadata(doc, responseObject) {
     return writeReplacementMetadata(doc, responseObject);
 }
 
-function removeMetadata(doc, responseObject) {
-    if (!doc || !responseObject) {
-        return false;
-    }
-    if (responseObject.__integrationMetadataRemovalNeeded !== true) {
-        return true;
-    }
-
-    loadReplacementXMPLibrary();
-    XMPMeta.registerNamespace(REPLACEMENT_XMP_NAMESPACE_URI, REPLACEMENT_XMP_PREFIX);
-    var xmp = getDocumentXMP(doc);
-    if (xmp.doesPropertyExist(REPLACEMENT_XMP_NAMESPACE_URI, REPLACEMENT_XMP_PROPERTY)) {
-        xmp.deleteProperty(REPLACEMENT_XMP_NAMESPACE_URI, REPLACEMENT_XMP_PROPERTY);
-    }
-    if (xmp.doesPropertyExist(REPLACEMENT_XMP_NAMESPACE_URI, REPLACEMENT_XMP_PROPERTY)) {
-        return false;
-    }
-
-    var serializedXmp = xmp.serialize();
-    if (!serializedXmp) {
-        return false;
-    }
-    doc.xmpMetadata.rawData = serializedXmp;
-
-    var verifiedXmp = getDocumentXMP(doc);
-    return !verifiedXmp.doesPropertyExist(
-        REPLACEMENT_XMP_NAMESPACE_URI,
-        REPLACEMENT_XMP_PROPERTY
-    );
-}
-
 function restoreMetadata(doc, responseObject) {
     if (!doc || !responseObject || typeof responseObject.__integrationOriginalXmpRawData === "undefined") {
         return false;
@@ -5038,43 +3935,12 @@ function preflightMetadata(doc, responseObject) {
     return true;
 }
 
-function preflightMetadataRemoval(doc, responseObject) {
-    if (!doc || !responseObject) {
-        return false;
-    }
-
-    loadReplacementXMPLibrary();
-    XMPMeta.registerNamespace(REPLACEMENT_XMP_NAMESPACE_URI, REPLACEMENT_XMP_PREFIX);
-    var originalRawData = doc.xmpMetadata.rawData || "";
-    var xmp = originalRawData ? new XMPMeta(originalRawData) : new XMPMeta();
-    var removalNeeded = xmp.doesPropertyExist(
-        REPLACEMENT_XMP_NAMESPACE_URI,
-        REPLACEMENT_XMP_PROPERTY
-    );
-
-    if (removalNeeded) {
-        xmp.deleteProperty(REPLACEMENT_XMP_NAMESPACE_URI, REPLACEMENT_XMP_PROPERTY);
-        if (xmp.doesPropertyExist(REPLACEMENT_XMP_NAMESPACE_URI, REPLACEMENT_XMP_PROPERTY)) {
-            return false;
-        }
-        if (!xmp.serialize()) {
-            return false;
-        }
-    }
-
-    responseObject.__integrationOriginalXmpRawData = originalRawData;
-    responseObject.__integrationMetadataRemovalNeeded = removalNeeded;
-    return true;
-}
-
 return {
     prepare: prepare,
     applyMode: applyMode,
     preflightMetadata: preflightMetadata,
-    preflightMetadataRemoval: preflightMetadataRemoval,
     restoreMetadata: restoreMetadata,
-    writeMetadata: writeMetadata,
-    removeMetadata: removeMetadata
+    writeMetadata: writeMetadata
 };
 }
 

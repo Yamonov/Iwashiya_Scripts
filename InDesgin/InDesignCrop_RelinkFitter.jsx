@@ -3,15 +3,16 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.InDesignCrop_RelinkFitter
-Version=1.0.2
+Version=1.0.5
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/InDesgin
 Name=Psで処理したXMPを読み取り、正確な位置に配置
 Author=Murakami Yoshiteru
-Release-Date=2026-05-13
+Release-Date=2026-08-09
 Target-App=InDesign
 Edit-Password-SHA256=KQKaYksEnVBdnx7G:dd55774c95f3bacda14e9860dfebf5c4c26c4a2452870c28dc2bb331d7218f7a
 Description-BEGIN
-Photoshop_InDesign_cropで処理した際に追加されるXMPタグを読み込み、2種類の配置方法をプレビューしながら適用します。
+Photoshop_InDesignResizeCropで処理した際に追加されるXMPタグを読み込み、2種類の配置方法をプレビューしながら適用します。
+リンクが更新されていない場合は、自動更新してから処理します。
 Description-END
 SCRIPTMETA-END
 */
@@ -115,6 +116,10 @@ SCRIPTMETA-END
         modifiedLink: {
             ja: "リンクが更新されていません。InDesignのリンクパネルを更新してから実行してください。",
             en: "The link has not been updated. Update it in InDesign's Links panel, then run this script again."
+        },
+        linkUpdateFailed: {
+            ja: "リンクを自動更新できませんでした。InDesignのリンクパネルを確認してください。",
+            en: "The link could not be updated automatically. Check InDesign's Links panel."
         }
     };
 
@@ -249,18 +254,21 @@ SCRIPTMETA-END
     }
 
     function buildPreparedTarget(frame, graphic) {
-        var linkStatusMessage = getGraphicLinkStatusMessage(graphic);
+        var linkPreparation = ensureGraphicLinkIsCurrent(frame, graphic);
         var replacementReadResult;
         var replacementData;
         var replacementValidationMessage;
         var originalSnapshot;
 
-        if (linkStatusMessage) {
+        if (linkPreparation.message) {
             return {
                 target: null,
-                message: linkStatusMessage
+                message: linkPreparation.message
             };
         }
+
+        frame = linkPreparation.frame;
+        graphic = linkPreparation.graphic;
 
         replacementReadResult = readReplacementDataFromGraphic(graphic);
         replacementData = replacementReadResult.data;
@@ -784,20 +792,113 @@ SCRIPTMETA-END
         return 100;
     }
 
-    function getGraphicLinkStatusMessage(graphic) {
+    function ensureGraphicLinkIsCurrent(frame, graphic) {
         var link = getGraphicLink(graphic);
+        var updatedLink = null;
+        var refreshedTarget = null;
+
         if (!link) {
-            return uiText("selectionRequired");
+            return createLinkPreparationResult(null, null, uiText("selectionRequired"));
         }
         try {
             if (link.status === LinkStatus.NORMAL) {
-                return "";
+                return createLinkPreparationResult(frame, graphic, "");
             }
             if (link.status === LinkStatus.LINK_MISSING) {
-                return uiText("missingLink");
+                return createLinkPreparationResult(null, null, uiText("missingLink"));
+            }
+            if (link.status === LinkStatus.LINK_OUT_OF_DATE) {
+                try {
+                    updatedLink = link.update();
+                    refreshedTarget = resolveGraphicAfterLinkUpdate(frame, graphic, updatedLink);
+                    if (refreshedTarget) {
+                        return createLinkPreparationResult(
+                            refreshedTarget.frame,
+                            refreshedTarget.graphic,
+                            ""
+                        );
+                    }
+                    return createLinkPreparationResult(null, null, uiText("linkUpdateFailed"));
+                } catch (updateError) {
+                    refreshedTarget = resolveGraphicAfterLinkUpdate(frame, graphic, updatedLink);
+                    if (refreshedTarget) {
+                        link = getGraphicLink(refreshedTarget.graphic);
+                    }
+                    if (refreshedTarget && link) {
+                        try {
+                            if (link.status === LinkStatus.NORMAL) {
+                                return createLinkPreparationResult(
+                                    refreshedTarget.frame,
+                                    refreshedTarget.graphic,
+                                    ""
+                                );
+                            }
+                            if (link.status === LinkStatus.LINK_MISSING) {
+                                return createLinkPreparationResult(null, null, uiText("missingLink"));
+                            }
+                        } catch (updatedStatusError) {}
+                    }
+                    return createLinkPreparationResult(null, null, uiText("linkUpdateFailed"));
+                }
             }
         } catch (e) {}
-        return uiText("modifiedLink");
+        return createLinkPreparationResult(null, null, uiText("modifiedLink"));
+    }
+
+    function createLinkPreparationResult(frame, graphic, message) {
+        return {
+            frame: frame,
+            graphic: graphic,
+            message: message
+        };
+    }
+
+    function resolveGraphicAfterLinkUpdate(frame, previousGraphic, updatedLink) {
+        var graphic = getGraphicFromLink(updatedLink);
+        var refreshedFrame = null;
+
+        if (!graphic) {
+            graphic = getGraphicFromSelection(frame);
+        }
+        if (!graphic && getGraphicLink(previousGraphic)) {
+            graphic = previousGraphic;
+        }
+        if (!graphic || !getGraphicLink(graphic)) {
+            return null;
+        }
+
+        refreshedFrame = getGraphicFrame(graphic);
+        if (!refreshedFrame) {
+            try {
+                if (frame && frame.isValid) {
+                    refreshedFrame = frame;
+                }
+            } catch (e) {}
+        }
+        if (!refreshedFrame) {
+            return null;
+        }
+
+        return {
+            frame: refreshedFrame,
+            graphic: graphic
+        };
+    }
+
+    function getGraphicFromLink(link) {
+        var graphic = null;
+
+        try {
+            if (link && link.isValid && link.parent && link.parent.isValid) {
+                graphic = link.parent;
+            }
+        } catch (e) {}
+
+        if (graphic && getGraphicLink(graphic)) {
+            return graphic;
+        }
+
+        return null;
     }
 
     function getGraphicLink(graphic) {

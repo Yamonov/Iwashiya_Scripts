@@ -1,6 +1,6 @@
 SCRIPTMETA-DIST-BEGIN
 
 Script-ID=org.iwashi.InDesignCrop_RelinkFitter
-Version=1.0.2
+Version=1.0.5
 
 SCRIPTMETA-DIST-END
