@@ -774,6 +774,12 @@ function releaseIllustratorForegroundRequest(request) {
     }
 }
 
+function getCanonicalIllustratorMajorSpecifier(specifier) {
+    var match = String(specifier || "").match(/^(illustrator(?:beta|prerelease)?)-(\d+)/i);
+    if (!match) return "";
+    return String(match[1]).toLowerCase() + "-" + String(match[2]);
+}
+
 function requestIllustratorForegroundAfterScript(target) {
     if (!target) return false;
     try {
@@ -784,9 +790,16 @@ function requestIllustratorForegroundAfterScript(target) {
 
     var request = null;
     try {
+        var foregroundSpecifier = getCanonicalIllustratorMajorSpecifier(target);
+        if (!foregroundSpecifier) return false;
         request = new BridgeTalk();
         request.target = target;
-        request.body = "(function(){ $.sleep(150); BridgeTalk.bringToFront(BridgeTalk.appSpecifier); return 'ok'; })();";
+        request.body = "(function(){" +
+            "$.sleep(150);" +
+            "try { if (app.documents.length > 0) app.activeDocument.activate(); } catch (_documentActivationError) {}" +
+            "BridgeTalk.bringToFront(" + toSourceLiteral(foregroundSpecifier) + ");" +
+            "return 'ok';" +
+            "})();";
         request.timeout = 5;
         var releaseRequest = function() {
             releaseIllustratorForegroundRequest(request);
@@ -799,6 +812,7 @@ function requestIllustratorForegroundAfterScript(target) {
         while (pendingIllustratorForegroundRequests.length > 16) {
             pendingIllustratorForegroundRequests.shift();
         }
+        // Adobeは即時送信できずキューへ入れた場合もfalseを返すため、解放せず応答/タイムアウトを待つ。
         request.send();
         return true;
     } catch (_foregroundRequestError) {
