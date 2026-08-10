@@ -796,31 +796,12 @@ function requestIllustratorForegroundAfterScript(target) {
         request.target = target;
         request.body = "(function(){" +
             "$.sleep(150);" +
+            "var __showTransientActivationDialog = " + showTransientActivationDialog.toString() + ";" +
             "var __foregroundDocument = null;" +
             "try { if (app.documents.length > 0) __foregroundDocument = app.activeDocument; } catch (_documentReadError) {}" +
             "try { if (__foregroundDocument) __foregroundDocument.activate(); } catch (_documentActivationError) {}" +
             "try { BridgeTalk.bringToFront(" + toSourceLiteral(foregroundSpecifier) + "); } catch (_applicationActivationError) {}" +
-            "var __activationDialog = null;" +
-            "try {" +
-                "__activationDialog = new Window('dialog', 'Illustrator');" +
-                "__activationDialog.preferredSize = [150, 70];" +
-                "var __activationButton = __activationDialog.add('button', undefined, 'OK', { name: 'ok' });" +
-                "__activationDialog.defaultElement = __activationButton;" +
-                "__activationDialog.cancelElement = __activationButton;" +
-                "__activationButton.onClick = function() { __activationDialog.close(); };" +
-                "var __activationHandled = false;" +
-                "__activationDialog.onActivate = function() {" +
-                    "if (__activationHandled) return;" +
-                    "__activationHandled = true;" +
-                    "try { __activationDialog.update(); } catch (_dialogUpdateError) {}" +
-                    "$.sleep(75);" +
-                    "try { __activationDialog.close(); } catch (_dialogCloseError) {}" +
-                "};" +
-                "try { if (__activationDialog.center) __activationDialog.center(); } catch (_dialogCenterError) {}" +
-                "__activationDialog.show();" +
-            "} catch (_dialogError) {" +
-                "try { if (__activationDialog) __activationDialog.close(); } catch (_dialogCleanupError) {}" +
-            "}" +
+            "__showTransientActivationDialog('Illustrator');" +
             "try { if (__foregroundDocument) __foregroundDocument.activate(); } catch (_finalDocumentActivationError) {}" +
             "return 'ok';" +
             "})();";
@@ -936,6 +917,34 @@ function activatePhotoshopWindow() {
     try {
         app.bringToFront();
     } catch (error) {}
+}
+
+// 通常のモーダルを短時間だけ表示し、実行中のAdobeアプリの前面化を促す。
+// onActivateが発生しない環境でも手動で閉じられるよう、OKを残す。
+function showTransientActivationDialog(title) {
+    var activationDialog = null;
+    try {
+        activationDialog = new Window("dialog", String(title || ""));
+        activationDialog.preferredSize = [150, 70];
+        var activationButton = activationDialog.add("button", undefined, "OK", { name: "ok" });
+        activationDialog.defaultElement = activationButton;
+        activationDialog.cancelElement = activationButton;
+        activationButton.onClick = function() { activationDialog.close(); };
+        var activationHandled = false;
+        activationDialog.onActivate = function() {
+            if (activationHandled) return;
+            activationHandled = true;
+            try { activationDialog.update(); } catch (_dialogUpdateError) { }
+            $.sleep(75);
+            try { activationDialog.close(); } catch (_dialogCloseError) { }
+        };
+        try { if (activationDialog.center) activationDialog.center(); } catch (_dialogCenterError) { }
+        activationDialog.show();
+        return true;
+    } catch (_dialogError) {
+        try { if (activationDialog) activationDialog.close(); } catch (_dialogCleanupError) { }
+    }
+    return false;
 }
 
 function buildDisplayPathForUI(pathText) {
@@ -1613,7 +1622,7 @@ function chooseInitialIllustratorCandidate(items, initialItem, warningLines, pho
     listBox.selection = listBox.items[initialIndex];
     listBox.onChange = function() {
         if (!this.selection || !this.selection.candidate) return;
-        selectInIllustrator(buildPlacementHandle(this.selection.candidate), false);
+        selectInIllustrator(buildPlacementHandle(this.selection.candidate), false, true);
     };
 
     var buttonGroup = dialog.add("group");
@@ -1937,6 +1946,10 @@ function illustratorAdapter(request) {
             ));
         }
         previewCandidate(resolved.document, resolved.item);
+        if (request && request.showTransientDialog === true) {
+            showTransientActivationDialog("Illustrator");
+            try { resolved.document.activate(); } catch (_reactivateDocumentError) { }
+        }
         return {
             status: "ok",
             matchType: String(handle.matchType || "exact"),
@@ -2892,6 +2905,7 @@ function buildInjectedIllustratorAdapterSource() {
     return illustratorAdapter.toString().replace(
         "/*__INJECT_HELPERS__*/",
         "var toSourceLiteral = " + toSourceLiteral.toString() + ";\n" +
+        "var showTransientActivationDialog = " + showTransientActivationDialog.toString() + ";\n" +
         "var toNFCJa = " + NFC_HELPER_SRC + ";\n" +
         "var _normPath = " + NORM_HELPER_SRC_ID + ";\n" +
         "var remoteLocaleCode = " + toSourceLiteral(currentLocaleCode()) + ";\n" +
@@ -2927,9 +2941,9 @@ function sendIllustratorAdapterRequest(bridgeTarget, requestData, timeoutMs) {
     return sendBridgeTalkAndWait(bridgeTarget, body, timeoutMs || 30000);
 }
 
-// 候補リストの変更時はIllustrator内の表示だけを更新し、アプリは前面にしない。
-// 「Illustratorで表示」から呼ぶ場合だけ、応答後に対象バージョンを前面にする。
-function selectInIllustrator(handle, bringApplicationToFront) {
+// 候補リストの変更時だけ、IllustratorとPhotoshopで短いダイアログを順に表示して
+// 対象を見せた後に元の候補ダイアログへ戻す。明示的な「Illustratorで表示」は従来どおり終了後に前面化する。
+function selectInIllustrator(handle, bringApplicationToFront, showTransientRoundTrip) {
     if (!handle || !handle.bridgeTarget) {
         alert(localText(
             "対象のIllustratorを確認できません。",
@@ -2939,7 +2953,8 @@ function selectInIllustrator(handle, bringApplicationToFront) {
     }
     var bridgeResult = sendIllustratorAdapterRequest(handle.bridgeTarget, {
         action: "preview",
-        placement: handle
+        placement: handle,
+        showTransientDialog: showTransientRoundTrip === true
     }, 15000);
     if (bringApplicationToFront !== true) activatePhotoshopWindow();
     if (!bridgeResult.ok) {
@@ -2952,6 +2967,9 @@ function selectInIllustrator(handle, bringApplicationToFront) {
             ? response.message
             : localText("Illustratorで配置を表示できませんでした。", "The placement could not be shown in Illustrator."));
         return false;
+    }
+    if (showTransientRoundTrip === true) {
+        showTransientActivationDialog("Photoshop");
     }
     if (bringApplicationToFront === true) {
         requestIllustratorForegroundAfterScript(handle.bridgeTarget);

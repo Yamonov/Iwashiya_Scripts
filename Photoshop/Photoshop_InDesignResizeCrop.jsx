@@ -756,6 +756,36 @@ function activatePhotoshopWindow() {
     } catch (error) {}
 }
 
+// 通常のモーダルを短時間だけ表示し、実行中のAdobeアプリの前面化を促す。
+// onActivateが発生しない環境でも手動で閉じられるよう、OKを残す。
+function showTransientActivationDialog(titleText) {
+    var activationDialog = null;
+    try {
+        activationDialog = new Window("dialog", String(titleText || ""));
+        activationDialog.preferredSize = [150, 70];
+        var activationButton = activationDialog.add("button", undefined, "OK", { name: "ok" });
+        activationDialog.defaultElement = activationButton;
+        activationDialog.cancelElement = activationButton;
+        activationButton.onClick = function() { activationDialog.close(); };
+        var activationHandled = false;
+        activationDialog.onActivate = function() {
+            if (activationHandled) return;
+            activationHandled = true;
+            try { activationDialog.update(); } catch (_dialogUpdateError) { }
+            $.sleep(75);
+            try { activationDialog.close(); } catch (_dialogCloseError) { }
+        };
+        try { if (activationDialog.center) activationDialog.center(); } catch (_dialogCenterError) { }
+        activationDialog.show();
+        return true;
+    } catch (_dialogError) {
+        try { if (activationDialog) activationDialog.close(); } catch (_dialogCleanupError) { }
+    }
+    return false;
+}
+
+var TRANSIENT_ACTIVATION_DIALOG_HELPER_SRC = showTransientActivationDialog.toString();
+
 function buildDisplayPathForUI(pathText) {
     var value = String(pathText || "");
     var isWindows = $.os.indexOf("Windows") >= 0;
@@ -1428,7 +1458,7 @@ function chooseInitialInDesignCandidate(items, initialItem, warningLines, photos
     listBox.selection = listBox.items[initialIndex];
     listBox.onChange = function() {
         if (!this.selection || !this.selection.candidate) return;
-        selectInInDesign(buildPlacementHandle(this.selection.candidate), false);
+        selectInInDesign(buildPlacementHandle(this.selection.candidate), false, true);
     };
 
     var buttonGroup = dialog.add("group");
@@ -2053,7 +2083,7 @@ function inDesignSide(targetInfo) {
 }
 
 // InDesign側: リンクを選択・表示する関数（配置候補の即時プレビュー用）
-function showInInDesignSide(handle) {
+function showInInDesignSide(handle, showActivationDialog) {
     /*__INJECT_HELPERS__*/
     if (app.documents.length === 0) {
         throw new Error("InDesign: " + remoteText("ドキュメントが開かれていません。", "No document is open."));
@@ -2123,6 +2153,9 @@ function showInInDesignSide(handle) {
             }
         }
     } catch (_z) { }
+    if (showActivationDialog === true) {
+        showTransientActivationDialog("InDesign");
+    }
     return;
 
     function fitSelection(win) {
@@ -2156,7 +2189,7 @@ function showInInDesignSide(handle) {
     }
 }
 
-function selectInInDesign(handle, bringApplicationToFront) {
+function selectInInDesign(handle, bringApplicationToFront, useTransientFocusRoundTrip) {
     var bridgeTarget = handle && handle.bridgeTarget ? String(handle.bridgeTarget) : "";
     if (!bridgeTarget) {
         alert(localText("対象のInDesignを確認できません。", "The target InDesign application could not be verified."));
@@ -2166,14 +2199,17 @@ function selectInInDesign(handle, bringApplicationToFront) {
         .replace("/*__INJECT_HELPERS__*/",
             "var toNFCJa = " + NFC_HELPER_SRC + ";\n" +
             "var _normPath = " + NORM_HELPER_SRC_ID + ";\n" +
-            "var getInDesignParentPage = " + INDESIGN_PARENT_PAGE_HELPER_SRC + ";");
+            "var getInDesignParentPage = " + INDESIGN_PARENT_PAGE_HELPER_SRC + ";\n" +
+            "var showTransientActivationDialog = " + TRANSIENT_ACTIVATION_DIALOG_HELPER_SRC + ";");
+    var showActivationDialog = useTransientFocusRoundTrip === true;
     var showBody = "(" +
         "function(){" +
         "var remoteLocaleCode = " + toSourceLiteral(currentLocaleCode()) + ";" +
         "function remoteText(jaText, enText) { return remoteLocaleCode === 'en' ? enText : jaText; }" +
         showSrc + "\n" +
         "var __handle = " + toSourceLiteral(handle || {}) + ";" +
-        "showInInDesignSide(__handle);" +
+        "var __showActivationDialog = " + (showActivationDialog ? "true" : "false") + ";" +
+        "showInInDesignSide(__handle, __showActivationDialog);" +
         "return 'ok';" +
         "}" +
         ")();";
@@ -2181,6 +2217,10 @@ function selectInInDesign(handle, bringApplicationToFront) {
     if (!bridgeTalkResult.ok) {
         alert(localText("InDesign通信エラー: ", "InDesign communication error: ") + bridgeTalkResult.error);
         return false;
+    }
+    if (showActivationDialog) {
+        activatePhotoshopWindow();
+        showTransientActivationDialog("Photoshop");
     }
     if (bringApplicationToFront !== false) {
         bringInDesignTargetToFront(bridgeTarget);
