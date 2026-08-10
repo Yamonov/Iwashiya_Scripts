@@ -286,6 +286,38 @@ function restoreHistoryStateAfterFailure(doc, historyState) {
     return false;
 }
 
+function snapshotDocumentGuides(doc) {
+    if (!doc) return null;
+    var snapshot = [];
+    try {
+        for (var index = 0; index < doc.guides.length; index++) {
+            snapshot.push({
+                direction: doc.guides[index].direction,
+                position: Number(doc.guides[index].coordinate.as("px"))
+            });
+        }
+    } catch (_guideSnapshotError) {
+        return null;
+    }
+    return snapshot;
+}
+
+function restoreDocumentGuides(doc, snapshot) {
+    if (!doc || !(snapshot instanceof Array)) return false;
+    try {
+        for (var removeIndex = doc.guides.length - 1; removeIndex >= 0; removeIndex--) {
+            doc.guides[removeIndex].remove();
+        }
+        for (var addIndex = 0; addIndex < snapshot.length; addIndex++) {
+            var guide = snapshot[addIndex];
+            if (!guide || !isFinite(Number(guide.position))) return false;
+            doc.guides.add(guide.direction, UnitValue(Number(guide.position), "px"));
+        }
+        return doc.guides.length === snapshot.length;
+    } catch (_guideRestoreError) { }
+    return false;
+}
+
 function getHistoryStatusByName(doc, name) {
     try {
         var hs = doc.historyStates;
@@ -1178,18 +1210,20 @@ function finalizeIllustratorResizeFlow(ctx) {
     try {
         historyStateBeforeProcess = doc.activeHistoryState;
     } catch (_historySnapshotError) { }
+    var guidesBeforeProcess = snapshotDocumentGuides(doc);
     var resizeResult = runWithHistory(ctx.photoshopSession, HISTORY_NAME, "performResizeFromCtx()");
     __HISTORY_CTX__ = null;
     if (!resizeResult || resizeResult.ok !== true) {
+        var restoredAfterProcessError = restoreHistoryStateAfterFailure(doc, historyStateBeforeProcess);
         var metadataRestoredAfterProcessError = true;
         if (cropResponse && cropResponse.__integrationMetadataChangeAttempted === true) {
             metadataRestoredAfterProcessError = CropIntegration.restoreMetadata(doc, cropResponse);
         }
-        var restoredAfterProcessError = restoreHistoryStateAfterFailure(doc, historyStateBeforeProcess);
+        var guidesRestoredAfterProcessError = restoreDocumentGuides(doc, guidesBeforeProcess);
         alert(
             localText("リサイズ・トリミング処理に失敗しました。", "Resize and trimming failed.") + "\n" +
             (resizeResult && resizeResult.error ? resizeResult.error : localText("原因不明のエラー", "Unknown error")) +
-            (restoredAfterProcessError && metadataRestoredAfterProcessError
+            (restoredAfterProcessError && metadataRestoredAfterProcessError && guidesRestoredAfterProcessError
                 ? localText("\n処理前の状態に戻しました。", "\nThe document was restored to its pre-process state.")
                 : localText("\n完全には処理前の状態へ戻せませんでした。ヒストリーパネルとファイル情報を確認してください。", "\nThe document could not be fully restored. Check the History panel and File Info."))
         );
@@ -1846,13 +1880,14 @@ function illustratorAdapter(request) {
 
     function resolvePlacementHandle(handle) {
         var matches = [];
+        var expectedLinkPath = normalizePath(handle.linkPath || "");
         for (var documentIndex = 0; documentIndex < app.documents.length; documentIndex++) {
             var document = app.documents[documentIndex];
             if (!documentMatchesHandle(document, handle)) continue;
             var item = getItemByUuid(document, handle.itemUuid);
             if (!item || safeTypename(item) !== "PlacedItem") continue;
             var fileInfo = readPlacedFileInfo(item);
-            if (handle.linkPath && fileInfo.normalizedPath !== String(handle.linkPath)) continue;
+            if (expectedLinkPath && fileInfo.normalizedPath !== expectedLinkPath) continue;
             matches.push({
                 document: document,
                 documentIndex: documentIndex,
@@ -1864,10 +1899,10 @@ function illustratorAdapter(request) {
     }
 
     function documentMatchesHandle(document, handle) {
-        var expectedPath = String(handle.documentPath || "");
+        var expectedPath = normalizePath(handle.documentPath || "");
         var actualPath = getDocumentPath(document);
         if (expectedPath) return actualPath === expectedPath;
-        return String(document.name || "") === String(handle.documentName || "");
+        return toNFCJa(String(document.name || "")) === toNFCJa(String(handle.documentName || ""));
     }
 
     function getItemByUuid(document, uuid) {
@@ -1875,7 +1910,10 @@ function illustratorAdapter(request) {
         if (!value) return null;
         try {
             var direct = document.getPageItemFromUuid(value);
-            if (direct && String(direct.uuid || "") === value) return direct;
+            if (direct && String(direct.uuid || "") === value &&
+                    safeTypename(direct) === "PlacedItem") {
+                return direct;
+            }
         } catch (_uuidLookupError) { }
         var items = document.placedItems;
         for (var index = 0; index < items.length; index++) {
