@@ -764,12 +764,46 @@ function getRunningIllustratorTargets() {
     return targets;
 }
 
-function bringIllustratorTargetToFront(target) {
+var pendingIllustratorForegroundRequests = [];
+
+function releaseIllustratorForegroundRequest(request) {
+    for (var requestIndex = pendingIllustratorForegroundRequests.length - 1; requestIndex >= 0; requestIndex--) {
+        if (pendingIllustratorForegroundRequests[requestIndex] === request) {
+            pendingIllustratorForegroundRequests.splice(requestIndex, 1);
+        }
+    }
+}
+
+function requestIllustratorForegroundAfterScript(target) {
     if (!target) return false;
     try {
-        BridgeTalk.bringToFront(target);
+        if (BridgeTalk.isRunning(target) !== true) return false;
+    } catch (_runningError) {
+        return false;
+    }
+
+    var request = null;
+    try {
+        request = new BridgeTalk();
+        request.target = target;
+        request.body = "(function(){ $.sleep(150); BridgeTalk.bringToFront(BridgeTalk.appSpecifier); return 'ok'; })();";
+        request.timeout = 5;
+        var releaseRequest = function() {
+            releaseIllustratorForegroundRequest(request);
+        };
+        request.onResult = releaseRequest;
+        request.onError = releaseRequest;
+        request.onTimeout = releaseRequest;
+
+        pendingIllustratorForegroundRequests.push(request);
+        while (pendingIllustratorForegroundRequests.length > 16) {
+            pendingIllustratorForegroundRequests.shift();
+        }
+        request.send();
         return true;
-    } catch (_bringToFrontError) { }
+    } catch (_foregroundRequestError) {
+        if (request) releaseIllustratorForegroundRequest(request);
+    }
     return false;
 }
 
@@ -1128,7 +1162,7 @@ function finalizeIllustratorResizeFlow(ctx) {
         if (dialogResult && dialogResult.hasOwnProperty('usePrev')) saveUsePrevOnly(dialogResult.usePrev);
     } catch (_) { }
     if (dialogResult && dialogResult.showIllustratorTarget) {
-        bringIllustratorTargetToFront(dialogResult.showIllustratorTarget);
+        requestIllustratorForegroundAfterScript(dialogResult.showIllustratorTarget);
         return;
     }
     if (!dialogResult || dialogResult.cancelled) return;
@@ -1572,7 +1606,7 @@ function chooseInitialIllustratorCandidate(items, initialItem, warningLines, pho
 
     var result = dialog.show();
     if (result === 2 && showIllustratorTarget) {
-        bringIllustratorTargetToFront(showIllustratorTarget);
+        requestIllustratorForegroundAfterScript(showIllustratorTarget);
         return null;
     }
     if (result !== 1 || !listBox.selection) return null;
@@ -2882,7 +2916,7 @@ function selectInIllustrator(handle, bringApplicationToFront) {
         return false;
     }
     if (bringApplicationToFront === true) {
-        bringIllustratorTargetToFront(handle.bridgeTarget);
+        requestIllustratorForegroundAfterScript(handle.bridgeTarget);
     }
     return true;
 }
