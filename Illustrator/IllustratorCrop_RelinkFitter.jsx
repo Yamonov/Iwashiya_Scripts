@@ -3,7 +3,7 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.IllustratorCrop_RelinkFitter
-Version=1.0.1
+Version=1.0.2
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=Psの伸ばし情報で位置を変えずに再配置
 Author=Murakami Yoshiteru
@@ -190,6 +190,7 @@ SCRIPTMETA-END
     var COORDINATE_SPACE = "image-local";
     var GEOMETRY_EPSILON = 0.000000000001;
     var MASK_BOUNDS_TOLERANCE_PT = 0.05;
+    var MATRIX_VALUE_TOLERANCE = 0.000001;
 
     if (app.documents.length === 0) {
         alert(uiText("noDocument"));
@@ -551,7 +552,6 @@ SCRIPTMETA-END
 
     function applyPlacement(item, placement, reference) {
         var placementMatrix;
-        var currentTopLeft;
 
         if (!placement || placement.width <= 0 || placement.height <= 0) {
             return false;
@@ -560,30 +560,26 @@ SCRIPTMETA-END
         placementMatrix = buildPlacementMatrix(item, placement, reference);
         if (!placementMatrix) return false;
         try { item.matrix = placementMatrix; } catch (matrixError) { return false; }
-
-        currentTopLeft = getCurrentItemTopLeft(item);
-        if (!currentTopLeft) {
-            return false;
-        }
-
-        return translateItem(
-            item,
-            placement.topLeft[0] - currentTopLeft[0],
-            placement.topLeft[1] - currentTopLeft[1]
-        );
+        return matrixValuesMatch(readItemTransformMatrix(item), placementMatrix);
     }
 
     function buildPlacementMatrix(item, placement, reference) {
-        var sourceSize = getPlacedItemSourceSize(item);
-        if (!sourceSize || !reference || !reference.axisX || !reference.axisY ||
+        var sourceBounds = getPlacedItemSourceBounds(item);
+        if (!sourceBounds || !reference || !reference.axisX || !reference.axisY ||
                 placement.width <= 0 || placement.height <= 0) {
             return null;
         }
         var matrix = app.getIdentityMatrix();
-        matrix.mValueA = reference.axisX[0] * placement.width / sourceSize.width;
-        matrix.mValueB = -reference.axisX[1] * placement.width / sourceSize.width;
-        matrix.mValueC = -reference.axisY[0] * placement.height / sourceSize.height;
-        matrix.mValueD = reference.axisY[1] * placement.height / sourceSize.height;
+        matrix.mValueA = reference.axisX[0] * placement.width / sourceBounds.width;
+        matrix.mValueB = -reference.axisX[1] * placement.width / sourceBounds.width;
+        matrix.mValueC = -reference.axisY[0] * placement.height / sourceBounds.height;
+        matrix.mValueD = reference.axisY[1] * placement.height / sourceBounds.height;
+        matrix.mValueTX = placement.topLeft[0] -
+            matrix.mValueA * sourceBounds.minX +
+            matrix.mValueC * sourceBounds.minY;
+        matrix.mValueTY = placement.topLeft[1] +
+            matrix.mValueB * sourceBounds.minX -
+            matrix.mValueD * sourceBounds.minY;
         return matrix;
     }
 
@@ -808,16 +804,7 @@ SCRIPTMETA-END
 
     function getCurrentPlacementSnapshot(item) {
         var matrix = readItemTransformMatrix(item);
-        var topLeft = getCurrentItemTopLeft(item);
-
-        if (!matrix || !topLeft) {
-            return null;
-        }
-
-        return {
-            transformMatrix: matrix,
-            topLeft: topLeft
-        };
+        return matrix ? {transformMatrix: matrix} : null;
     }
 
     function readItemTransformMatrix(item) {
@@ -846,9 +833,25 @@ SCRIPTMETA-END
         return copied;
     }
 
-    function restoreTransformSnapshot(item, snapshot) {
-        var currentTopLeft;
+    function matrixValuesMatch(actual, expected) {
+        var fields = ["mValueA", "mValueB", "mValueC", "mValueD", "mValueTX", "mValueTY"];
+        var actualValue;
+        var expectedValue;
+        var tolerance;
 
+        if (!actual || !expected) return false;
+        for (var index = 0; index < fields.length; index++) {
+            actualValue = readFiniteNumber(actual[fields[index]]);
+            expectedValue = readFiniteNumber(expected[fields[index]]);
+            if (actualValue === null || expectedValue === null) return false;
+            tolerance = MATRIX_VALUE_TOLERANCE +
+                Math.max(Math.abs(actualValue), Math.abs(expectedValue)) * 0.000000001;
+            if (Math.abs(actualValue - expectedValue) > tolerance) return false;
+        }
+        return true;
+    }
+
+    function restoreTransformSnapshot(item, snapshot) {
         if (!snapshot || !snapshot.transformMatrix) {
             return false;
         }
@@ -858,14 +861,7 @@ SCRIPTMETA-END
         } catch (matrixError) {
             return false;
         }
-
-        currentTopLeft = getCurrentItemTopLeft(item);
-        if (!currentTopLeft || !snapshot.topLeft) return false;
-        return translateItem(
-            item,
-            snapshot.topLeft[0] - currentTopLeft[0],
-            snapshot.topLeft[1] - currentTopLeft[1]
-        );
+        return matrixValuesMatch(readItemTransformMatrix(item), snapshot.transformMatrix);
     }
 
     function getPlacedItemFile(item) {
@@ -1239,47 +1235,25 @@ SCRIPTMETA-END
             t * t * t * p3;
     }
 
-    function getCurrentItemTopLeft(item) {
-        var quad = getPlacedItemQuad(item);
-        return quad && quad.length >= 4 ? quad[0] : null;
-    }
-
-    function getPlacedItemQuad(item) {
-        try {
-            var matrix = item.matrix;
-            var sourceSize = getPlacedItemSourceSize(item);
-            var bounds = readNumberArray(item.geometricBounds, 4);
-            if (!matrix || !sourceSize || !bounds) return null;
-            var a = readFiniteNumber(matrix.mValueA);
-            var b = readFiniteNumber(matrix.mValueB);
-            var c = readFiniteNumber(matrix.mValueC);
-            var d = readFiniteNumber(matrix.mValueD);
-            if (a === null || b === null || c === null || d === null) return null;
-            var edgeX = [sourceSize.width * a, sourceSize.width * -b];
-            var edgeY = [sourceSize.height * -c, sourceSize.height * d];
-            var center = [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2];
-            var topLeft = subtractPoints(center, scalePoint(addPoints(edgeX, edgeY), 0.5));
-            var topRight = addPoints(topLeft, edgeX);
-            var bottomLeft = addPoints(topLeft, edgeY);
-            return [
-                topLeft,
-                topRight,
-                addPoints(topRight, edgeY),
-                bottomLeft
-            ];
-        } catch (quadError) {
-            return null;
-        }
-    }
-
-    function getPlacedItemSourceSize(item) {
+    function getPlacedItemSourceBounds(item) {
         var box = null;
         try { box = readNumberArray(item.boundingBox, 4); } catch (boundingBoxError) { box = null; }
         if (!box) return null;
-        var width = Math.abs(box[2] - box[0]);
-        var height = Math.abs(box[1] - box[3]);
+        var minX = Math.min(box[0], box[2]);
+        var minY = Math.min(box[1], box[3]);
+        var maxX = Math.max(box[0], box[2]);
+        var maxY = Math.max(box[1], box[3]);
+        var width = maxX - minX;
+        var height = maxY - minY;
         return width > GEOMETRY_EPSILON && height > GEOMETRY_EPSILON
-            ? {width: width, height: height}
+            ? {
+                minX: minX,
+                minY: minY,
+                maxX: maxX,
+                maxY: maxY,
+                width: width,
+                height: height
+            }
             : null;
     }
 
@@ -1295,14 +1269,6 @@ SCRIPTMETA-END
         var determinant = axisX[0] * axisY[1] - axisX[1] * axisY[0];
         if (Math.abs(determinant) <= GEOMETRY_EPSILON) return null;
         return {axisX: axisX, axisY: axisY, determinant: determinant};
-    }
-
-    function translateItem(item, dx, dy) {
-        try {
-            item.translate(dx, dy);
-            return true;
-        } catch (translateError) {}
-        return false;
     }
 
     function hasDirectParent(item, parent) {
@@ -1380,10 +1346,6 @@ SCRIPTMETA-END
 
     function addPoints(a, b) {
         return [getNumber(a[0]) + getNumber(b[0]), getNumber(a[1]) + getNumber(b[1])];
-    }
-
-    function subtractPoints(a, b) {
-        return [getNumber(a[0]) - getNumber(b[0]), getNumber(a[1]) - getNumber(b[1])];
     }
 
     function scalePoint(point, scale) {
