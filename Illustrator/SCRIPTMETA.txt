@@ -4,7 +4,7 @@ Script-ID=org.iwashi.CMYKto100GCRConverter_ai
 Version=2.3
 
 Script-ID=org.iwashi.IllustratorCrop_RelinkFitter
-Version=1.0.2
+Version=2
 
 Script-ID=org.iwashi.CMYKChannelCopies
 Version=0.5
@@ -17,6 +17,9 @@ Version=1
 
 Script-ID=keypadSettingsChager_Ai
 Version=1.4
+
+Script-ID=org.iwashi.textframewidthchanger
+Version=1
 
 SCRIPTMETA-DIST-END
 

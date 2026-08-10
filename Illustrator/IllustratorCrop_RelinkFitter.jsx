@@ -3,9 +3,9 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.IllustratorCrop_RelinkFitter
-Version=1.0.2
+Version=2
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
-Name=Psの伸ばし情報で位置を変えずに再配置
+Name=Psで処理したXMPを読み取り、正確な位置に配置
 Author=Murakami Yoshiteru
 Release-Date=2026-08-10
 Target-App=Illustrator
@@ -18,6 +18,7 @@ Photoshopでxmpタグを埋め込んでいない場合は動作しません。
 Photoshop側のIllustrator ResizeCropスクリプトとセットで運用してください。
 Description-END
 SCRIPTMETA-END
+
 */
 
 (function () {

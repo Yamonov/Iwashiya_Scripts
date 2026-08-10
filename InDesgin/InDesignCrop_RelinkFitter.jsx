@@ -3,7 +3,7 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.InDesignCrop_RelinkFitter
-Version=1.0.5
+Version=2
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/InDesgin
 Name=Psで処理したXMPを読み取り、正確な位置に配置
 Author=Murakami Yoshiteru
