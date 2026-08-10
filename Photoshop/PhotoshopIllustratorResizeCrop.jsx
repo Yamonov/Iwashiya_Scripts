@@ -3298,18 +3298,7 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
             infoText.maximumSize.height = infoText.preferredSize.height;
         } catch (e) { }
 
-        var displayedInfoMessage = String(infoMessage || "");
-        if (trimmingAvailable !== true) {
-            var unavailableReason = trimmingReason || localText(
-                "この配置ではトリミング処理を選択できません。",
-                "Trimming is unavailable for this placement."
-            );
-            if (displayedInfoMessage && !/[\r\n]$/.test(displayedInfoMessage)) {
-                displayedInfoMessage += "\n";
-            }
-            displayedInfoMessage += unavailableReason;
-        }
-        var messageText = panel.add("statictext", undefined, displayedInfoMessage, {
+        var messageText = panel.add("statictext", undefined, infoMessage, {
             multiline: true
         });
         messageText.minimumSize.width = 400;
@@ -3581,6 +3570,16 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
         var scale = Math.max(requiredW / docWidthPx, requiredH / docHeightPx);
         var scalePct = scale * 100;
         var warningBag = createWarningBag();
+        if (trimmingAvailable !== true) {
+            addWarning(
+                warningBag,
+                WARN_STYLE_DEFAULT_BOLD,
+                trimmingReason || localText(
+                    "この配置ではトリミング処理を選択できません。",
+                    "Trimming is unavailable for this placement."
+                )
+            );
+        }
         addWarning(warningBag, WARN_STYLE_DEFAULT_NORMAL, hasSmartObject ? SMART_OBJECT_INTERP_WARNING : "");
         if (placedWmm > 0 && placedHmm > 0) {
             var effW = docWidthPx * 25.4 / placedWmm;
