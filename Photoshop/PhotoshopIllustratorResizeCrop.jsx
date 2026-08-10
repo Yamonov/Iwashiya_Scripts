@@ -1490,21 +1490,6 @@ function _normPathLocal(p) {
 }
 var NORM_HELPER_SRC_ID = _normPathLocal.toString();
 
-function buildInitialCandidateRowData(item, index) {
-    var order = String(index + 1);
-    if (order.length < 2) order = "0" + order;
-    var pageText = item && item.pageName ? String(item.pageName) : "-";
-    var sizeText = "-";
-    if (item && isFinite(Number(item.displayWidthMM)) && isFinite(Number(item.displayHeightMM))) {
-        sizeText = Number(item.displayWidthMM).toFixed(2) + " × " + Number(item.displayHeightMM).toFixed(2) + " mm";
-    }
-    return {
-        order: order,
-        page: pageText,
-        size: sizeText
-    };
-}
-
 function buildPlacementHandle(candidate) {
     return {
         bridgeTarget: candidate.bridgeTarget || "",
@@ -1515,6 +1500,19 @@ function buildPlacementHandle(candidate) {
         linkPath: candidate.linkPath || "",
         matchType: candidate.matchType || "exact",
         geometryFingerprint: candidate.geometryFingerprint || null
+    };
+}
+
+// 対象アプリ内の候補選択には、配置を一意に解決する情報だけを渡す。
+// 既に取得済みのgeometry fingerprintやマスク点列は再送・再検証しない。
+function buildChooserPlacementHandle(candidate) {
+    return {
+        bridgeTarget: candidate.bridgeTarget || "",
+        documentName: candidate.documentName || "",
+        documentPath: candidate.documentPath || "",
+        itemUuid: candidate.itemUuid || "",
+        linkPath: candidate.linkPath || "",
+        matchType: candidate.matchType || "exact"
     };
 }
 
@@ -1532,132 +1530,198 @@ function hasValidPlacementGeometryFingerprint(fingerprint) {
     return true;
 }
 
-function chooseInitialIllustratorCandidate(items, initialItem, warningLines, photoshopFileName) {
-    if (!items || !items.length) return null;
-    if (items.length === 1) return items[0];
+function groupCandidateItemsByBridgeTarget(items) {
+    var groups = [];
+    for (var itemIndex = 0; items && itemIndex < items.length; itemIndex++) {
+        var item = items[itemIndex];
+        var bridgeTarget = String(item && item.bridgeTarget ? item.bridgeTarget : "");
+        var group = null;
+        for (var groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+            if (groups[groupIndex].bridgeTarget === bridgeTarget) {
+                group = groups[groupIndex];
+                break;
+            }
+        }
+        if (!group) {
+            group = {
+                bridgeTarget: bridgeTarget,
+                applicationVersion: String(item && item.applicationVersion ? item.applicationVersion : ""),
+                items: []
+            };
+            groups.push(group);
+        } else if (!group.applicationVersion && item && item.applicationVersion) {
+            group.applicationVersion = String(item.applicationVersion);
+        }
+        group.items.push(item);
+    }
+    return groups;
+}
 
-    var dialog = new Window("dialog", localText("処理する配置を選択", "Select Placement to Process"));
+function buildCandidateTargetGroupLabel(group, applicationName) {
+    var bridgeTarget = String(group && group.bridgeTarget ? group.bridgeTarget : "");
+    var displayName = String(applicationName || "Adobe");
+    if (/^illustratorbeta-/i.test(bridgeTarget)) displayName += " Beta";
+    else if (/^illustratorprerelease-/i.test(bridgeTarget)) displayName += " Prerelease";
+
+    var version = String(group && group.applicationVersion ? group.applicationVersion : "");
+    if (version) displayName += " " + version;
+    else if (bridgeTarget) displayName += " (" + bridgeTarget + ")";
+
+    var itemCount = group && group.items ? group.items.length : 0;
+    return displayName + " — " + itemCount + localText(
+        "件",
+        itemCount === 1 ? " placement" : " placements"
+    );
+}
+
+function chooseCandidateTargetGroupInPhotoshop(groups, defaultItem, applicationName) {
+    if (!groups || !groups.length) return null;
+    if (groups.length === 1) return groups[0];
+
+    var dialog = new Window("dialog", localText("対象バージョンを選択", "Select Application Version"));
     dialog.orientation = "column";
     dialog.alignChildren = ["fill", "top"];
     dialog.spacing = 8;
     dialog.margins = 12;
 
-    var columnTitles = [
-        localText("連番", "No."),
-        localText("アートボード", "Artboard"),
-        localText("サイズ", "Size")
-    ];
-    var rowDataList = [];
-    var orderValues = [columnTitles[0]];
-    var pageValues = [columnTitles[1]];
-    var sizeValues = [columnTitles[2]];
-    for (var rowDataIndex = 0; rowDataIndex < items.length; rowDataIndex++) {
-        var rowData = buildInitialCandidateRowData(items[rowDataIndex], rowDataIndex);
-        rowDataList.push(rowData);
-        orderValues.push(rowData.order);
-        pageValues.push(rowData.page);
-        sizeValues.push(rowData.size);
-    }
-
-    function measureColumnWidth(values, minimumWidth) {
-        var width = Number(minimumWidth) || 0;
-        for (var valueIndex = 0; valueIndex < values.length; valueIndex++) {
-            var textValue = String(values[valueIndex] || "");
-            var measuredWidth = textValue.length * 7;
-            try {
-                measuredWidth = Number(dialog.graphics.measureString(textValue)[0]);
-            } catch (_measureError) { }
-            if (isFinite(measuredWidth)) {
-                width = Math.max(width, Math.ceil(measuredWidth) + 24);
-            }
-        }
-        return Math.ceil(width);
-    }
-
-    var columnWidths = [
-        measureColumnWidth(orderValues, 54),
-        measureColumnWidth(pageValues, 100),
-        measureColumnWidth(sizeValues, 180)
-    ];
-    var listWidth = columnWidths[0] + columnWidths[1] + columnWidths[2] + 34;
-    var contentWidth = Math.max(440, listWidth);
-
-    var lines = warningLines || [];
-    for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-        var messageLine = dialog.add("statictext", undefined, String(lines[lineIndex] || ""), { multiline: true });
-        messageLine.preferredSize = [contentWidth, 34];
-    }
-    var explanation = dialog.add("statictext", undefined, localText(
-        "ここで選択した同じ配置を、リサイズ・ガイド・切り抜き・XMPに使用します。",
-        "The same selected placement will be used for resizing, guides, cropping, and XMP."
-    ), { multiline: true });
-    explanation.preferredSize = [contentWidth, 34];
-
-    var fileNameText = dialog.add("statictext", undefined,
-        localText("ファイル名：", "File name: ") + String(photoshopFileName || "-"),
-        { multiline: true });
-    fileNameText.preferredSize = [contentWidth, 34];
-
-    var listBox = dialog.add("listbox", undefined, [], {
-        multiselect: false,
-        numberOfColumns: 3,
-        showHeaders: true,
-        columnTitles: columnTitles,
-        columnWidths: columnWidths
-    });
-    var visibleRowCount = Math.max(4, Math.min(8, items.length));
-    listBox.preferredSize = [contentWidth, 28 + visibleRowCount * 22];
+    var labels = [];
     var initialIndex = 0;
-    for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
-        var row = listBox.add("item", rowDataList[itemIndex].order);
-        row.subItems[0].text = rowDataList[itemIndex].page;
-        row.subItems[1].text = rowDataList[itemIndex].size;
-        row.candidate = items[itemIndex];
-        if (initialItem && String(items[itemIndex].itemUuid || "") === String(initialItem.itemUuid || "") &&
-                String(items[itemIndex].documentPath || "") === String(initialItem.documentPath || "") &&
-                String(items[itemIndex].bridgeTarget || "") === String(initialItem.bridgeTarget || "")) {
-            initialIndex = itemIndex;
+    for (var groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+        var group = groups[groupIndex];
+        labels.push(buildCandidateTargetGroupLabel(group, applicationName));
+        for (var itemIndex = 0; group.items && itemIndex < group.items.length; itemIndex++) {
+            if (group.items[itemIndex] === defaultItem) initialIndex = groupIndex;
         }
+    }
+
+    var contentWidth = 360;
+    for (var labelIndex = 0; labelIndex < labels.length; labelIndex++) {
+        try {
+            contentWidth = Math.max(contentWidth,
+                Math.ceil(Number(dialog.graphics.measureString(labels[labelIndex])[0])) + 34);
+        } catch (_measureTargetLabelError) { }
+    }
+    var prompt = dialog.add("statictext", undefined, localText(
+        "候補が複数の" + applicationName + "バージョンで見つかりました。先に対象バージョンを選択してください。",
+        "Matching placements were found in multiple " + applicationName + " versions. Select the target version first."
+    ), {multiline: true});
+    prompt.preferredSize = [contentWidth, 34];
+
+    var listBox = dialog.add("listbox", undefined, [], {multiselect: false});
+    listBox.preferredSize = [contentWidth, 28 + Math.max(2, Math.min(8, groups.length)) * 22];
+    for (var rowIndex = 0; rowIndex < groups.length; rowIndex++) {
+        var row = listBox.add("item", labels[rowIndex]);
+        row.targetGroup = groups[rowIndex];
     }
     listBox.selection = listBox.items[initialIndex];
-    listBox.onChange = function() {
-        if (!this.selection || !this.selection.candidate) return;
-        selectInIllustrator(buildPlacementHandle(this.selection.candidate), false, true);
-    };
 
     var buttonGroup = dialog.add("group");
     buttonGroup.alignment = ["right", "center"];
-    var cancelButton = buttonGroup.add("button", undefined, localText("キャンセル", "Cancel"), { name: "cancel" });
-    var showButton = buttonGroup.add("button", undefined, localText("Illustratorで表示", "Show in Illustrator"));
-    var okButton = buttonGroup.add("button", undefined, "OK", { name: "ok" });
+    var cancelButton = buttonGroup.add("button", undefined, localText("キャンセル", "Cancel"), {name: "cancel"});
+    var okButton = buttonGroup.add("button", undefined, "OK", {name: "ok"});
     dialog.defaultElement = okButton;
     dialog.cancelElement = cancelButton;
-
     cancelButton.onClick = function() { dialog.close(0); };
     okButton.onClick = function() {
-        if (!listBox.selection) {
-            alert(localText("候補を選択してください。", "Select a candidate."));
-            return;
-        }
+        if (!listBox.selection) return;
         dialog.close(1);
     };
-    var showIllustratorTarget = "";
-    showButton.onClick = function() {
-        if (!listBox.selection) return;
-        var placementHandle = buildPlacementHandle(listBox.selection.candidate);
-        if (selectInIllustrator(placementHandle, false)) {
-            showIllustratorTarget = String(placementHandle.bridgeTarget || "");
-            dialog.close(2);
-        }
-    };
 
-    var result = dialog.show();
-    if (result === 2 && showIllustratorTarget) {
-        requestIllustratorForegroundAfterScript(showIllustratorTarget);
+    if (dialog.show() !== 1 || !listBox.selection) return null;
+    return listBox.selection.targetGroup;
+}
+
+// 同じIllustratorプロセス内の候補を、そのIllustrator自身のダイアログで選択する。
+// BridgeTalk応答後はOK/キャンセルのどちらでもPhotoshopへ戻してから呼び出し元へ返す。
+function chooseInitialIllustratorCandidateInTarget(items, initialItem, warningLines, photoshopFileName) {
+    if (!items || !items.length) return null;
+
+    var bridgeTarget = String(items[0].bridgeTarget || "");
+    if (!bridgeTarget) {
+        alert(localText(
+            "対象のIllustratorを確認できません。",
+            "The target Illustrator application could not be verified."
+        ));
         return null;
     }
-    if (result !== 1 || !listBox.selection) return null;
-    return listBox.selection.candidate;
+
+    var chooserEntries = [];
+    var initialIndex = 0;
+    for (var itemIndex = 0; itemIndex < items.length; itemIndex++) {
+        var candidate = items[itemIndex];
+        if (String(candidate.bridgeTarget || "") !== bridgeTarget) {
+            alert(localText(
+                "異なるIllustratorバージョンの候補を同時に表示できません。",
+                "Candidates from different Illustrator versions cannot be shown together."
+            ));
+            return null;
+        }
+        chooserEntries.push({
+            index: itemIndex,
+            placement: buildChooserPlacementHandle(candidate),
+            pageName: candidate.pageName || "",
+            displayWidthMM: candidate.displayWidthMM,
+            displayHeightMM: candidate.displayHeightMM
+        });
+        if (initialItem &&
+                String(candidate.itemUuid || "") === String(initialItem.itemUuid || "") &&
+                String(candidate.documentPath || "") === String(initialItem.documentPath || "")) {
+            initialIndex = itemIndex;
+        }
+    }
+
+    var bridgeResult = sendIllustratorAdapterRequest(bridgeTarget, {
+        action: "choose",
+        candidates: chooserEntries,
+        initialIndex: initialIndex,
+        warningLines: warningLines || [],
+        photoshopFileName: String(photoshopFileName || "")
+    }, 86400000);
+
+    // 対象側のモーダルが閉じた後、結果にかかわらずPhotoshopへ操作を戻す。
+    activatePhotoshopWindow();
+    showTransientActivationDialog("Photoshop");
+
+    if (!bridgeResult.ok) {
+        alert(localText("Illustrator通信エラー: ", "Illustrator communication error: ") + bridgeResult.error);
+        return null;
+    }
+    var response = parseBridgeTalkJson(bridgeResult.body, bridgeResult.body, "Illustrator");
+    if (response && response.status === "cancel") return null;
+    if (!response || response.status !== "ok") {
+        alert(response && response.message
+            ? response.message
+            : localText(
+                "Illustratorで処理対象を選択できませんでした。",
+                "The placement to process could not be selected in Illustrator."
+            ));
+        return null;
+    }
+
+    var selectedIndex = Number(response.selectedIndex);
+    if (!isFinite(selectedIndex) || Math.floor(selectedIndex) !== selectedIndex ||
+            selectedIndex < 0 || selectedIndex >= items.length) {
+        alert(localText(
+            "Illustratorから返された選択結果が正しくありません。",
+            "The selection returned by Illustrator is invalid."
+        ));
+        return null;
+    }
+    var selectedItem = items[selectedIndex];
+    var returnedPlacement = response.placement || null;
+    if (!returnedPlacement ||
+            String(returnedPlacement.bridgeTarget || "") !== bridgeTarget ||
+            String(returnedPlacement.documentPath || "") !== String(selectedItem.documentPath || "") ||
+            String(returnedPlacement.documentName || "") !== String(selectedItem.documentName || "") ||
+            String(returnedPlacement.itemUuid || "") !== String(selectedItem.itemUuid || "") ||
+            String(returnedPlacement.linkPath || "") !== String(selectedItem.linkPath || "")) {
+        alert(localText(
+            "Illustratorから返された配置情報が選択候補と一致しません。",
+            "The placement returned by Illustrator does not match the selected candidate."
+        ));
+        return null;
+    }
+    return selectedItem;
 }
 
 function main() {
@@ -1747,8 +1811,14 @@ function main() {
         item.hasExtensionDifference = hasExtensionDifference;
     }
 
-    var candidateItemsArray = matchedItems;
-    var defaultTargetItem = candidateItemsArray[findLargestIllustratorCandidateIndex(candidateItemsArray)];
+    var allCandidateItems = matchedItems;
+    var defaultTargetItem = allCandidateItems[findLargestIllustratorCandidateIndex(allCandidateItems)];
+    var targetGroups = groupCandidateItemsByBridgeTarget(allCandidateItems);
+    var selectedTargetGroup = chooseCandidateTargetGroupInPhotoshop(targetGroups, defaultTargetItem, "Illustrator");
+    if (!selectedTargetGroup) return;
+
+    var candidateItemsArray = selectedTargetGroup.items;
+    defaultTargetItem = candidateItemsArray[findLargestIllustratorCandidateIndex(candidateItemsArray)];
     var selectedTargetItem = defaultTargetItem;
 
     if (matchType === "nameOnly" && candidateItemsArray.length === 1) {
@@ -1778,7 +1848,12 @@ function main() {
                 "The same image was found in multiple Illustrator placements."
             ));
         }
-        selectedTargetItem = chooseInitialIllustratorCandidate(candidateItemsArray, defaultTargetItem, candidateWarnings, doc.name);
+        selectedTargetItem = chooseInitialIllustratorCandidateInTarget(
+            candidateItemsArray,
+            defaultTargetItem,
+            candidateWarnings,
+            doc.name
+        );
         if (!selectedTargetItem) return;
     }
 
@@ -1820,6 +1895,7 @@ function illustratorAdapter(request) {
             )));
         }
         if (action === "discover") return toSourceLiteral(discoverCandidates());
+        if (action === "choose") return toSourceLiteral(chooseCandidateResponse());
         if (action === "preview") return toSourceLiteral(previewCandidateResponse());
         return toSourceLiteral(errorResponse(remoteText(
             "Illustratorへの要求が正しくありません。",
@@ -1917,6 +1993,176 @@ function illustratorAdapter(request) {
         };
     }
 
+    function chooseCandidateResponse() {
+        var entries = request && request.candidates instanceof Array
+            ? request.candidates
+            : [];
+        if (!entries.length) {
+            return errorResponse(remoteText(
+                "選択するIllustrator配置がありません。",
+                "There are no Illustrator placements to select."
+            ));
+        }
+
+        var initialIndex = Number(request && request.initialIndex);
+        if (!isFinite(initialIndex) || Math.floor(initialIndex) !== initialIndex ||
+                initialIndex < 0 || initialIndex >= entries.length) {
+            initialIndex = 0;
+        }
+
+        var dialog = new Window("dialog", remoteText("処理する配置を選択", "Select Placement to Process"));
+        dialog.orientation = "column";
+        dialog.alignChildren = ["fill", "top"];
+        dialog.spacing = 8;
+        dialog.margins = 12;
+
+        var columnTitles = [
+            remoteText("連番", "No."),
+            remoteText("アートボード", "Artboard"),
+            remoteText("サイズ", "Size")
+        ];
+        var orderValues = [columnTitles[0]];
+        var pageValues = [columnTitles[1]];
+        var sizeValues = [columnTitles[2]];
+        var rowData = [];
+        for (var entryIndex = 0; entryIndex < entries.length; entryIndex++) {
+            var entry = entries[entryIndex] || {};
+            var order = String(entryIndex + 1);
+            if (order.length < 2) order = "0" + order;
+            var pageText = entry.pageName ? String(entry.pageName) : "-";
+            var sizeText = "-";
+            if (isFinite(Number(entry.displayWidthMM)) && isFinite(Number(entry.displayHeightMM))) {
+                sizeText = Number(entry.displayWidthMM).toFixed(2) + " × " +
+                    Number(entry.displayHeightMM).toFixed(2) + " mm";
+            }
+            rowData.push({order: order, page: pageText, size: sizeText});
+            orderValues.push(order);
+            pageValues.push(pageText);
+            sizeValues.push(sizeText);
+        }
+
+        function measureColumnWidth(values, minimumWidth) {
+            var width = Number(minimumWidth) || 0;
+            for (var valueIndex = 0; valueIndex < values.length; valueIndex++) {
+                var textValue = String(values[valueIndex] || "");
+                var measuredWidth = textValue.length * 7;
+                try { measuredWidth = Number(dialog.graphics.measureString(textValue)[0]); } catch (_measureError) { }
+                if (isFinite(measuredWidth)) width = Math.max(width, Math.ceil(measuredWidth) + 24);
+            }
+            return Math.ceil(width);
+        }
+
+        var columnWidths = [
+            measureColumnWidth(orderValues, 54),
+            measureColumnWidth(pageValues, 100),
+            measureColumnWidth(sizeValues, 180)
+        ];
+        var contentWidth = Math.max(440,
+            columnWidths[0] + columnWidths[1] + columnWidths[2] + 34);
+        var warningLines = request && request.warningLines instanceof Array
+            ? request.warningLines
+            : [];
+        for (var lineIndex = 0; lineIndex < warningLines.length; lineIndex++) {
+            var messageLine = dialog.add("statictext", undefined,
+                String(warningLines[lineIndex] || ""), {multiline: true});
+            messageLine.preferredSize = [contentWidth, 34];
+        }
+        var explanation = dialog.add("statictext", undefined, remoteText(
+            "ここで選択した同じ配置を、リサイズ・ガイド・切り抜き・XMPに使用します。",
+            "The same selected placement will be used for resizing, guides, cropping, and XMP."
+        ), {multiline: true});
+        explanation.preferredSize = [contentWidth, 34];
+        var fileNameText = dialog.add("statictext", undefined,
+            remoteText("ファイル名：", "File name: ") +
+                String(request && request.photoshopFileName ? request.photoshopFileName : "-"),
+            {multiline: true});
+        fileNameText.preferredSize = [contentWidth, 34];
+
+        var listBox = dialog.add("listbox", undefined, [], {
+            multiselect: false,
+            numberOfColumns: 3,
+            showHeaders: true,
+            columnTitles: columnTitles,
+            columnWidths: columnWidths
+        });
+        var visibleRowCount = Math.max(4, Math.min(8, entries.length));
+        listBox.preferredSize = [contentWidth, 28 + visibleRowCount * 22];
+        for (var rowIndex = 0; rowIndex < entries.length; rowIndex++) {
+            var row = listBox.add("item", rowData[rowIndex].order);
+            row.subItems[0].text = rowData[rowIndex].page;
+            row.subItems[1].text = rowData[rowIndex].size;
+            row.entry = entries[rowIndex];
+        }
+        listBox.selection = listBox.items[initialIndex];
+
+        var lastPreviewedIndex = -1;
+        function previewChooserEntry(selectedEntry, reportError) {
+            var handle = selectedEntry && selectedEntry.placement
+                ? selectedEntry.placement
+                : null;
+            if (!handle) {
+                if (reportError !== false) alert(remoteText(
+                    "選択したIllustrator配置情報がありません。",
+                    "The selected Illustrator placement information is unavailable."
+                ));
+                return false;
+            }
+            try {
+                var resolved = resolvePlacementHandle(handle);
+                if (!resolved) throw new Error(remoteText(
+                    "選択したIllustrator配置が見つかりません。",
+                    "The selected Illustrator placement could not be found."
+                ));
+                previewCandidate(resolved.document, resolved.item);
+                lastPreviewedIndex = Number(selectedEntry.index);
+                return true;
+            } catch (previewError) {
+                lastPreviewedIndex = -1;
+                if (reportError !== false) alert(String(previewError));
+            }
+            return false;
+        }
+
+        listBox.onChange = function() {
+            if (!this.selection || !this.selection.entry) return;
+            previewChooserEntry(this.selection.entry, true);
+        };
+
+        var selectedEntry = null;
+        var buttonGroup = dialog.add("group");
+        buttonGroup.alignment = ["right", "center"];
+        var cancelButton = buttonGroup.add("button", undefined,
+            remoteText("キャンセル", "Cancel"), {name: "cancel"});
+        var okButton = buttonGroup.add("button", undefined, "OK", {name: "ok"});
+        dialog.defaultElement = okButton;
+        dialog.cancelElement = cancelButton;
+        cancelButton.onClick = function() { dialog.close(0); };
+        okButton.onClick = function() {
+            if (!listBox.selection || !listBox.selection.entry) {
+                alert(remoteText("候補を選択してください。", "Select a candidate."));
+                return;
+            }
+            var entryToUse = listBox.selection.entry;
+            if (lastPreviewedIndex !== Number(entryToUse.index) &&
+                    !previewChooserEntry(entryToUse, true)) {
+                return;
+            }
+            selectedEntry = entryToUse;
+            dialog.close(1);
+        };
+
+        // 最初の候補も、対象側のダイアログを出す前に同じ直接プレビュー経路へ通す。
+        previewChooserEntry(entries[initialIndex], true);
+        try { if (dialog.center) dialog.center(); } catch (_dialogCenterError) { }
+        var dialogResult = dialog.show();
+        if (dialogResult !== 1 || !selectedEntry) return {status: "cancel"};
+        return {
+            status: "ok",
+            selectedIndex: Number(selectedEntry.index),
+            placement: selectedEntry.placement
+        };
+    }
+
     function previewCandidateResponse() {
         var handle = request && request.placement ? request.placement : null;
         if (!handle) {
@@ -1946,10 +2192,6 @@ function illustratorAdapter(request) {
             ));
         }
         previewCandidate(resolved.document, resolved.item);
-        if (request && request.showTransientDialog === true) {
-            showTransientActivationDialog("Illustrator");
-            try { resolved.document.activate(); } catch (_reactivateDocumentError) { }
-        }
         return {
             status: "ok",
             matchType: String(handle.matchType || "exact"),
@@ -2081,6 +2323,7 @@ function illustratorAdapter(request) {
         );
 
         return {
+            applicationVersion: String(app.version || ""),
             documentIndex: documentIndex,
             documentName: String(document.name || ""),
             documentPath: getDocumentPath(document),
@@ -2905,7 +3148,6 @@ function buildInjectedIllustratorAdapterSource() {
     return illustratorAdapter.toString().replace(
         "/*__INJECT_HELPERS__*/",
         "var toSourceLiteral = " + toSourceLiteral.toString() + ";\n" +
-        "var showTransientActivationDialog = " + showTransientActivationDialog.toString() + ";\n" +
         "var toNFCJa = " + NFC_HELPER_SRC + ";\n" +
         "var _normPath = " + NORM_HELPER_SRC_ID + ";\n" +
         "var remoteLocaleCode = " + toSourceLiteral(currentLocaleCode()) + ";\n" +
@@ -2941,9 +3183,8 @@ function sendIllustratorAdapterRequest(bridgeTarget, requestData, timeoutMs) {
     return sendBridgeTalkAndWait(bridgeTarget, body, timeoutMs || 30000);
 }
 
-// 候補リストの変更時だけ、IllustratorとPhotoshopで短いダイアログを順に表示して
-// 対象を見せた後に元の候補ダイアログへ戻す。明示的な「Illustratorで表示」は従来どおり終了後に前面化する。
-function selectInIllustrator(handle, bringApplicationToFront, showTransientRoundTrip) {
+// Photoshopの明示的な「Illustratorで表示」操作に応じ、配置を表示する。
+function selectInIllustrator(handle, bringApplicationToFront) {
     if (!handle || !handle.bridgeTarget) {
         alert(localText(
             "対象のIllustratorを確認できません。",
@@ -2953,8 +3194,7 @@ function selectInIllustrator(handle, bringApplicationToFront, showTransientRound
     }
     var bridgeResult = sendIllustratorAdapterRequest(handle.bridgeTarget, {
         action: "preview",
-        placement: handle,
-        showTransientDialog: showTransientRoundTrip === true
+        placement: handle
     }, 15000);
     if (bringApplicationToFront !== true) activatePhotoshopWindow();
     if (!bridgeResult.ok) {
@@ -2967,9 +3207,6 @@ function selectInIllustrator(handle, bringApplicationToFront, showTransientRound
             ? response.message
             : localText("Illustratorで配置を表示できませんでした。", "The placement could not be shown in Illustrator."));
         return false;
-    }
-    if (showTransientRoundTrip === true) {
-        showTransientActivationDialog("Photoshop");
     }
     if (bringApplicationToFront === true) {
         requestIllustratorForegroundAfterScript(handle.bridgeTarget);
