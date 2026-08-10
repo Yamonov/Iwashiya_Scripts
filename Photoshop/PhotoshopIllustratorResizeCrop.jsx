@@ -3298,7 +3298,18 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
             infoText.maximumSize.height = infoText.preferredSize.height;
         } catch (e) { }
 
-        var messageText = panel.add("statictext", undefined, infoMessage, {
+        var displayedInfoMessage = String(infoMessage || "");
+        if (trimmingAvailable !== true) {
+            var unavailableReason = trimmingReason || localText(
+                "この配置ではトリミング処理を選択できません。",
+                "Trimming is unavailable for this placement."
+            );
+            if (displayedInfoMessage && !/[\r\n]$/.test(displayedInfoMessage)) {
+                displayedInfoMessage += "\n";
+            }
+            displayedInfoMessage += unavailableReason;
+        }
+        var messageText = panel.add("statictext", undefined, displayedInfoMessage, {
             multiline: true
         });
         messageText.minimumSize.width = 400;
@@ -3389,16 +3400,6 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
         if (trimmingAvailable !== true) {
             buttons[1].enabled = false;
             buttons[2].enabled = false;
-            var unavailableText = panel.add(
-                "statictext",
-                undefined,
-                trimmingReason || localText(
-                    "この配置ではトリミング処理を選択できません。",
-                    "Trimming is unavailable for this placement."
-                ),
-                {multiline: true}
-            );
-            unavailableText.margins = [20, 2, 0, 0];
         }
 
         var xmpDescriptionGroup = panel.add("group");
