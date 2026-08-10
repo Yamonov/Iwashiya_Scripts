@@ -7,7 +7,7 @@
 </javascriptresource>
 
 SCRIPTMETA-BEGIN
-Script-ID=org.iwashi.Photoshop_Illustrator_ResizeCrop
+Script-ID=org.iwashi.Photoshop_Illustrator_Resize
 Version=2.0
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=Illustrator配置に合わせてリサイズ・トリミング
@@ -3729,7 +3729,7 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
         }
     };
     buttonRow.helpButton.onClick = function () {
-        openURLInBrowser("https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop");
+        openURLInBrowser("https://gist.github.com/Yamonov/b63d9c67402ef7af4c17ab33caccce31");
         savePrefsAndClose(0, false);
     };
 

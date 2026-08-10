@@ -3,11 +3,8 @@ SCRIPTMETA-DIST-BEGIN
 Script-ID=org.iwashi.Halftone_Generator
 Version=1.2
 
-Script-ID=org.iwashi.Photoshop_Illustrator_Crop
-Version=0.7
-
 Script-ID=org.iwashi.Photoshop_Illustrator_Resize
-Version=1.6.5
+Version=2.0
 
 Script-ID=org.iwashi.Photoshop_InDesign_Resize
 Version=2.0
