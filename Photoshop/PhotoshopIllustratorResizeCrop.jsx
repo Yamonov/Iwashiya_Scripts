@@ -1132,43 +1132,23 @@ function finalizeIllustratorResizeFlow(ctx) {
     var upscaleMethod = dialogResult.method;
     var downscaleMethod = dialogResult.downMethod;
     var trimmingMode = dialogResult.trimmingMode || TRIMMING_MODE_NONE;
-    var cropResponse = null;
-
-    try {
-        cropResponse = getCropIntegration().prepare(illustratorSelectionHandle);
-    } catch (placementValidationError) {
-        alert(
-            localText(
-                "Illustratorの配置を再確認できないため、処理を中止しました。",
-                "Processing was cancelled because the Illustrator placement could not be revalidated."
-            ) + "\n" + placementValidationError
-        );
-        return;
-    }
-    if (!cropResponse) return;
-    var validatedItem = cropResponse.selected || null;
-    var validatedPlacedWmm = Number(validatedItem && validatedItem.placedWmm);
-    var validatedPlacedHmm = Number(validatedItem && validatedItem.placedHmm);
-    if (!isFinite(validatedPlacedWmm) || !isFinite(validatedPlacedHmm) ||
-            validatedPlacedWmm <= 0 || validatedPlacedHmm <= 0) {
-        alert(localText(
-            "再確認したIllustrator配置の寸法が正しくありません。",
-            "The revalidated Illustrator placement dimensions are invalid."
-        ));
-        return;
-    }
+    // Illustratorは初回探索時のスナップショットを正とし、OK後は再通信しない。
+    var cropResponse = {
+        status: "ok",
+        selected: targetItem
+    };
     if (trimmingMode !== TRIMMING_MODE_NONE &&
-            (!validatedItem.trimmingAvailable || !validatedItem.normalizedMaskBounds || !validatedItem.replacementData)) {
-        alert(validatedItem && validatedItem.trimmingReason
-            ? validatedItem.trimmingReason
+            (!targetItem.trimmingAvailable || !targetItem.normalizedMaskBounds || !targetItem.replacementData)) {
+        alert(targetItem.trimmingReason
+            ? targetItem.trimmingReason
             : localText(
                 "この配置ではトリミング処理を実行できません。",
                 "Trimming cannot be performed for this placement."
             ));
         return;
     }
-    var reqWpx = calcRequiredPixels(validatedPlacedWmm, targetPPI);
-    var reqHpx = calcRequiredPixels(validatedPlacedHmm, targetPPI);
+    var reqWpx = calcRequiredPixels(placedWmm, targetPPI);
+    var reqHpx = calcRequiredPixels(placedHmm, targetPPI);
     var scaleRatio = Math.max(reqWpx / docWidthPx, reqHpx / docHeightPx);
     var newWidthPx = Math.round(docWidthPx * scaleRatio);
     var newHeightPx = Math.round(docHeightPx * scaleRatio);
@@ -1181,6 +1161,7 @@ function finalizeIllustratorResizeFlow(ctx) {
 
     if (trimmingMode !== TRIMMING_MODE_NONE) {
         try {
+            getCropIntegration();
             if (!CropIntegration.preflightMetadata(doc, cropResponse)) {
                 throw new Error(localText("XMP配置情報がありません。", "XMP placement data is unavailable."));
             }
@@ -1741,8 +1722,7 @@ function illustratorAdapter(request) {
             )));
         }
         if (action === "discover") return toSourceLiteral(discoverCandidates());
-        if (action === "resolve") return toSourceLiteral(resolveCandidateResponse(false));
-        if (action === "preview") return toSourceLiteral(resolveCandidateResponse(true));
+        if (action === "preview") return toSourceLiteral(previewCandidateResponse());
         return toSourceLiteral(errorResponse(remoteText(
             "Illustratorへの要求が正しくありません。",
             "The Illustrator request is invalid."
@@ -1839,7 +1819,7 @@ function illustratorAdapter(request) {
         };
     }
 
-    function resolveCandidateResponse(shouldPreview) {
+    function previewCandidateResponse() {
         var handle = request && request.placement ? request.placement : null;
         if (!handle) {
             return errorResponse(remoteText(
@@ -1867,7 +1847,7 @@ function illustratorAdapter(request) {
                 "The position or transform of the selected Illustrator placement has changed."
             ));
         }
-        if (shouldPreview) previewCandidate(resolved.document, resolved.item);
+        previewCandidate(resolved.document, resolved.item);
         return {
             status: "ok",
             matchType: String(handle.matchType || "exact"),
@@ -3536,46 +3516,6 @@ function escapeJSONString(text) {
         .replace(/\n/g, "\\n")
         .replace(/\t/g, "\\t");
 }
-function requestCropDataFromIllustrator(placementSession) {
-    if (!placementSession || !placementSession.bridgeTarget ||
-            !placementSession.itemUuid || !placementSession.geometryFingerprint) {
-        return {
-            status: "error",
-            message: localText("選択したIllustrator配置を確認できません。", "The selected Illustrator placement could not be verified.")
-        };
-    }
-    var bridgeResult = sendToIllustrator(placementSession);
-    activatePhotoshopWindow();
-    if (!bridgeResult || bridgeResult.ok !== true) {
-        return {
-            status: "error",
-            message: localText("Illustrator通信エラー: ", "Illustrator communication error: ") +
-                String(bridgeResult && bridgeResult.error ? bridgeResult.error : localText("原因不明のエラー", "Unknown error"))
-        };
-    }
-    var responseObject = parseJsonResponse(bridgeResult.body);
-    if (responseObject) return responseObject;
-    return {
-        status: "error",
-        message: localText("Illustrator応答の解析に失敗しました。", "Failed to parse the Illustrator response.") + "\r" + bridgeResult.body
-    };
-}
-
-function handleIllustratorResponse(responseObject) {
-    if (!responseObject) {
-        alert(localText("Illustrator応答の解析に失敗しました。", "Failed to parse the Illustrator response."));
-        return false;
-    }
-    if (responseObject.status === "cancel") {
-        return false;
-    }
-    if (responseObject.status !== "ok") {
-        alert(responseObject.message || localText("Illustrator側でエラーが発生しました。", "An error occurred on the Illustrator side."));
-        return false;
-    }
-    return true;
-}
-
 function extractNormalizedMaskBounds(responseObject) {
     var selected = responseObject && responseObject.selected ? responseObject.selected : null;
     var bounds = selected && selected.normalizedMaskBounds
@@ -3629,23 +3569,6 @@ function toPixelAdjustmentValue(normalizedBoundary, pixelSize, mode) {
     }
     return delta > 0 ? pixels : "g" + pixels;
 }
-
-function sendToIllustrator(placementSession) {
-    if (!placementSession || !placementSession.bridgeTarget) {
-        return {
-            ok: false,
-            error: localText(
-                "選択したIllustrator配置を確認できません。",
-                "The selected Illustrator placement could not be verified."
-            )
-        };
-    }
-    return sendIllustratorAdapterRequest(placementSession.bridgeTarget, {
-        action: "resolve",
-        placement: placementSession
-    }, 300000);
-}
-
 
 function hasCanvasExpansion(expand) {
     if (!expand) return false;
@@ -3725,20 +3648,6 @@ function hasEquivalentGuide(guides, candidate) {
         } catch (_guideReadError) {}
     }
     return false;
-}
-
-function prepare(placementSession) {
-    var responseObject = requestCropDataFromIllustrator(placementSession);
-    if (!responseObject) {
-        alert(localText("Illustrator応答の解析に失敗しました。", "Failed to parse the Illustrator response."));
-        return null;
-    }
-
-    if (!handleIllustratorResponse(responseObject)) {
-        return null;
-    }
-
-    return responseObject;
 }
 
 function buildOperationSides(rawAdjustments) {
@@ -3979,7 +3888,6 @@ function preflightMetadata(doc, responseObject) {
 }
 
 return {
-    prepare: prepare,
     applyMode: applyMode,
     preflightMetadata: preflightMetadata,
     restoreMetadata: restoreMetadata,
