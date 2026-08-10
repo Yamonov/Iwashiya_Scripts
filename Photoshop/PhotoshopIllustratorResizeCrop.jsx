@@ -796,8 +796,32 @@ function requestIllustratorForegroundAfterScript(target) {
         request.target = target;
         request.body = "(function(){" +
             "$.sleep(150);" +
-            "try { if (app.documents.length > 0) app.activeDocument.activate(); } catch (_documentActivationError) {}" +
-            "BridgeTalk.bringToFront(" + toSourceLiteral(foregroundSpecifier) + ");" +
+            "var __foregroundDocument = null;" +
+            "try { if (app.documents.length > 0) __foregroundDocument = app.activeDocument; } catch (_documentReadError) {}" +
+            "try { if (__foregroundDocument) __foregroundDocument.activate(); } catch (_documentActivationError) {}" +
+            "try { BridgeTalk.bringToFront(" + toSourceLiteral(foregroundSpecifier) + "); } catch (_applicationActivationError) {}" +
+            "var __activationDialog = null;" +
+            "try {" +
+                "__activationDialog = new Window('dialog', 'Illustrator');" +
+                "__activationDialog.preferredSize = [150, 70];" +
+                "var __activationButton = __activationDialog.add('button', undefined, 'OK', { name: 'ok' });" +
+                "__activationDialog.defaultElement = __activationButton;" +
+                "__activationDialog.cancelElement = __activationButton;" +
+                "__activationButton.onClick = function() { __activationDialog.close(); };" +
+                "var __activationHandled = false;" +
+                "__activationDialog.onActivate = function() {" +
+                    "if (__activationHandled) return;" +
+                    "__activationHandled = true;" +
+                    "try { __activationDialog.update(); } catch (_dialogUpdateError) {}" +
+                    "$.sleep(75);" +
+                    "try { __activationDialog.close(); } catch (_dialogCloseError) {}" +
+                "};" +
+                "try { if (__activationDialog.center) __activationDialog.center(); } catch (_dialogCenterError) {}" +
+                "__activationDialog.show();" +
+            "} catch (_dialogError) {" +
+                "try { if (__activationDialog) __activationDialog.close(); } catch (_dialogCleanupError) {}" +
+            "}" +
+            "try { if (__foregroundDocument) __foregroundDocument.activate(); } catch (_finalDocumentActivationError) {}" +
             "return 'ok';" +
             "})();";
         request.timeout = 5;
