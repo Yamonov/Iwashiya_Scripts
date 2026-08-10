@@ -1162,6 +1162,12 @@ function finalizeIllustratorResizeFlow(ctx) {
     if (trimmingMode !== TRIMMING_MODE_NONE) {
         try {
             getCropIntegration();
+            if (!CropIntegration.setProcessingMode(cropResponse, trimmingMode)) {
+                throw new Error(localText(
+                    "XMP配置情報に処理方法を記録できません。",
+                    "The processing method could not be recorded in the XMP placement data."
+                ));
+            }
             if (!CropIntegration.preflightMetadata(doc, cropResponse)) {
                 throw new Error(localText("XMP配置情報がありません。", "XMP placement data is unavailable."));
             }
@@ -3469,6 +3475,19 @@ function extractReplacementData(responseObject) {
     return responseObject.selected.replacementData;
 }
 
+function setReplacementProcessingMode(responseObject, trimmingMode) {
+    if (trimmingMode !== TRIMMING_MODE_GUIDES &&
+            trimmingMode !== TRIMMING_MODE_CROP) {
+        return false;
+    }
+    var replacementData = extractReplacementData(responseObject);
+    if (!replacementData) {
+        return false;
+    }
+    replacementData.processingMode = trimmingMode;
+    return true;
+}
+
 function loadReplacementXMPLibrary() {
     if (ExternalObject.AdobeXMPScript === undefined) {
         ExternalObject.AdobeXMPScript = new ExternalObject("lib:AdobeXMPScript");
@@ -3889,6 +3908,7 @@ function preflightMetadata(doc, responseObject) {
 
 return {
     applyMode: applyMode,
+    setProcessingMode: setReplacementProcessingMode,
     preflightMetadata: preflightMetadata,
     restoreMetadata: restoreMetadata,
     writeMetadata: writeMetadata

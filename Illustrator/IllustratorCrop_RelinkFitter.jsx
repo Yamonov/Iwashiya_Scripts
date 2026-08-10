@@ -3,7 +3,7 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.IllustratorCrop_RelinkFitter
-Version=1.0
+Version=1.0.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=Psの伸ばし情報で位置を変えずに再配置
 Author=Murakami Yoshiteru
@@ -12,6 +12,7 @@ Target-App=Illustrator
 Edit-Password-SHA256=ZOv20mIwVP26NzJj:46c00dfa92b9392774dae9232e5b800346e33ba2dccaa2bdc8e7dfa99a7845bd
 Description-BEGIN
 Photoshop側のIllustrator ResizeCropスクリプトで追加されるXMPタグを読み込み、Illustrator上のクリッピングマスク位置に合わせてリンク画像を再配置します。
+リンク画像を更新してから、XMPと更新後の画像寸法を使って処理します。
 
 Photoshopでxmpタグを埋め込んでいない場合は動作しません。
 Photoshop側のIllustrator ResizeCropスクリプトとセットで運用してください。
@@ -167,14 +168,16 @@ SCRIPTMETA-END
             ja: "リンク切れ画像です。Illustratorのリンクパネルを確認してください。",
             en: "The linked image is missing. Check Illustrator's Links panel."
         },
-        modifiedLink: {
-            ja: "リンクが更新されていません。Illustratorのリンクパネルを更新してから実行してください。",
-            en: "The link has not been updated. Update it in Illustrator's Links panel, then run this script again."
+        linkUpdateFailed: {
+            ja: "リンクを更新できませんでした。Illustratorのリンクパネルを確認してください。",
+            en: "The link could not be updated. Check Illustrator's Links panel."
         }
     };
 
     var MODE_1 = "mode1";
     var MODE_2 = "mode2";
+    var PROCESSING_MODE_GUIDES = "extendWithGuides";
+    var PROCESSING_MODE_CROP = "extendAndCrop";
     var SCALE_DIFF_THRESHOLD = 0.5;
     var NO_SCALE_TEXT = uiText("noScale");
     var XMP_NAMESPACE_URI = "http://ns.yamo.jp/photoshop/illustrator-crop-replacement-data/1.0/";
@@ -292,7 +295,7 @@ SCRIPTMETA-END
     }
 
     function buildPreparedTarget(item) {
-        var linkStatusMessage = getPlacedItemLinkStatusMessage(item);
+        var linkRefresh = refreshPlacedItemLink(item);
         var replacementReadResult;
         var replacementData;
         var replacementValidationMessage;
@@ -300,12 +303,13 @@ SCRIPTMETA-END
         var maskDescriptor;
         var referenceGeometry;
 
-        if (linkStatusMessage) {
+        if (!linkRefresh.item) {
             return {
                 target: null,
-                message: linkStatusMessage
+                message: linkRefresh.message
             };
         }
+        item = linkRefresh.item;
 
         replacementReadResult = readReplacementDataFromPlacedItem(item);
         replacementData = replacementReadResult.data;
@@ -323,7 +327,7 @@ SCRIPTMETA-END
                 message: replacementValidationMessage
             };
         }
-        if (!replacementDataMatchesItem(item, replacementData)) {
+        if (!replacementDataMatchesItem(item, replacementData, linkRefresh.originalUuid)) {
             return {
                 target: null,
                 message: uiText("placementMismatch")
@@ -451,6 +455,14 @@ SCRIPTMETA-END
     }
 
     function resolveInitialMode(target) {
+        var processingMode = String(target && target.replacementData &&
+            target.replacementData.processingMode || "");
+        if (processingMode === PROCESSING_MODE_CROP) {
+            return MODE_2;
+        }
+        if (processingMode === PROCESSING_MODE_GUIDES) {
+            return MODE_1;
+        }
         if (buildModeScaleDisplayText(target, MODE_2) === NO_SCALE_TEXT) {
             return MODE_2;
         }
@@ -746,6 +758,11 @@ SCRIPTMETA-END
                 String(replacementData.coordinateSpace || "") !== COORDINATE_SPACE) {
             return uiText("notIllustratorMaskXmp");
         }
+        if (replacementData.hasOwnProperty("processingMode") &&
+                replacementData.processingMode !== PROCESSING_MODE_GUIDES &&
+                replacementData.processingMode !== PROCESSING_MODE_CROP) {
+            return uiText("xmpDataInvalid");
+        }
         if (!isValidReplacementMode(replacementData.mode1) || !isValidReplacementMode(replacementData.mode2)) {
             return uiText("xmpDataInvalid");
         }
@@ -778,9 +795,11 @@ SCRIPTMETA-END
             Number(bounds.bottom) > Number(bounds.top);
     }
 
-    function replacementDataMatchesItem(item, replacementData) {
+    function replacementDataMatchesItem(item, replacementData, preRelinkUuid) {
         var expectedUuid = String(replacementData && replacementData.placedItemUuid || "");
-        return !expectedUuid || expectedUuid === getItemUuid(item);
+        return !expectedUuid ||
+            expectedUuid === getItemUuid(item) ||
+            expectedUuid === String(preRelinkUuid || "");
     }
 
     function isFiniteNumber(value) {
@@ -849,23 +868,8 @@ SCRIPTMETA-END
         );
     }
 
-    function getPlacedItemLinkStatusMessage(item) {
-        var file = getPlacedItemFile(item);
-        var state = readLinkState(item, file);
-        if (!file) {
-            return uiText("notLinkedImage");
-        }
-        if (state === "missing") {
-            return uiText("missingLink");
-        }
-        if (state === "modified") {
-            return uiText("modifiedLink");
-        }
-        return "";
-    }
-
     function getPlacedItemFile(item) {
-        if (!item || item.typename !== "PlacedItem") {
+        if (!item || safeTypename(item) !== "PlacedItem") {
             return null;
         }
         try {
@@ -879,45 +883,107 @@ SCRIPTMETA-END
         return null;
     }
 
-    function readLinkState(item, fileObject) {
+    function refreshPlacedItemLink(item) {
+        var file = getPlacedItemFile(item);
+        var document;
+        var originalUuid;
+        var refreshedItem;
+
+        if (!file) {
+            return {
+                item: null,
+                originalUuid: "",
+                message: uiText("notLinkedImage")
+            };
+        }
+        if (!file.exists) {
+            return {
+                item: null,
+                originalUuid: "",
+                message: uiText("missingLink")
+            };
+        }
+
+        document = getItemDocument(item);
+        originalUuid = getItemUuid(item);
         try {
-            if (typeof item.status !== "undefined") {
-                return normalizeLinkState(item.status);
-            }
-        } catch (statusError) {}
-        try {
-            if (typeof item.linkStatus !== "undefined") {
-                return normalizeLinkState(item.linkStatus);
-            }
-        } catch (linkStatusError) {}
-        try {
-            if (fileObject && typeof fileObject.exists !== "undefined" && fileObject.exists === false) {
-                return "missing";
-            }
-        } catch (existsError) {}
-        return "ok";
+            item.relink(file);
+            try {
+                app.redraw();
+            } catch (redrawError) {}
+        } catch (relinkError) {
+            return {
+                item: null,
+                originalUuid: originalUuid,
+                message: uiText("linkUpdateFailed")
+            };
+        }
+
+        refreshedItem = getPlacedItemByUuid(document, originalUuid);
+        if (!refreshedItem && safeTypename(item) === "PlacedItem") {
+            refreshedItem = item;
+        }
+        if (!refreshedItem) {
+            return {
+                item: null,
+                originalUuid: originalUuid,
+                message: uiText("linkUpdateFailed")
+            };
+        }
+
+        return {
+            item: refreshedItem,
+            originalUuid: originalUuid,
+            message: ""
+        };
     }
 
-    function normalizeLinkState(value) {
-        var text = String(value || "").toLowerCase();
-        var numberValue;
-        if (text.indexOf("nodata") >= 0 || text.indexOf("missing") >= 0 || text.indexOf("notfound") >= 0) {
-            return "missing";
+    function getItemDocument(item) {
+        var current = item;
+        var depth = 0;
+        while (current && depth < 64) {
+            if (safeTypename(current) === "Document") {
+                return current;
+            }
+            try {
+                if (!current.parent || current.parent === current) break;
+                current = current.parent;
+            } catch (parentError) {
+                break;
+            }
+            depth++;
         }
-        if (text.indexOf("datamodified") >= 0 || text.indexOf("modified") >= 0 || text.indexOf("outdated") >= 0) {
-            return "modified";
-        }
-        if (text.indexOf("datafromfile") >= 0 || text.indexOf("normal") >= 0 || text.indexOf("ok") >= 0) {
-            return "ok";
-        }
-        numberValue = Number(value);
-        if (numberValue === 1) {
-            return "missing";
-        }
-        if (numberValue === 3) {
-            return "modified";
-        }
-        return "ok";
+        try {
+            return app.activeDocument;
+        } catch (documentError) {}
+        return null;
+    }
+
+    function getPlacedItemByUuid(document, uuid) {
+        var expectedUuid = String(uuid || "");
+        var direct;
+        var candidate;
+        var index;
+
+        if (!document || !expectedUuid) return null;
+        try {
+            direct = document.getPageItemFromUuid(expectedUuid);
+            if (safeTypename(direct) === "PlacedItem" &&
+                    getItemUuid(direct) === expectedUuid) {
+                return direct;
+            }
+        } catch (directLookupError) {}
+
+        try {
+            for (index = 0; index < document.placedItems.length; index++) {
+                candidate = document.placedItems[index];
+                if (safeTypename(candidate) === "PlacedItem" &&
+                        getItemUuid(candidate) === expectedUuid) {
+                    return candidate;
+                }
+            }
+        } catch (collectionError) {}
+        return null;
     }
 
     function collectSelectedPlacedItems(selection) {

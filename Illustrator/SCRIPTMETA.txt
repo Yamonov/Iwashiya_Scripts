@@ -4,7 +4,7 @@ Script-ID=org.iwashi.CMYKto100GCRConverter_ai
 Version=2.3
 
 Script-ID=org.iwashi.IllustratorCrop_RelinkFitter
-Version=1.0
+Version=1.0.1
 
 Script-ID=org.iwashi.CMYKChannelCopies
 Version=0.5
