@@ -1127,6 +1127,10 @@ function finalizeIllustratorResizeFlow(ctx) {
     try {
         if (dialogResult && dialogResult.hasOwnProperty('usePrev')) saveUsePrevOnly(dialogResult.usePrev);
     } catch (_) { }
+    if (dialogResult && dialogResult.showIllustratorTarget) {
+        bringIllustratorTargetToFront(dialogResult.showIllustratorTarget);
+        return;
+    }
     if (!dialogResult || dialogResult.cancelled) return;
     var targetPPI = dialogResult.ppi;
     var upscaleMethod = dialogResult.method;
@@ -1556,14 +1560,21 @@ function chooseInitialIllustratorCandidate(items, initialItem, warningLines, pho
         }
         dialog.close(1);
     };
+    var showIllustratorTarget = "";
     showButton.onClick = function() {
         if (!listBox.selection) return;
-        if (selectInIllustrator(buildPlacementHandle(listBox.selection.candidate), true)) {
+        var placementHandle = buildPlacementHandle(listBox.selection.candidate);
+        if (selectInIllustrator(placementHandle, false)) {
+            showIllustratorTarget = String(placementHandle.bridgeTarget || "");
             dialog.close(2);
         }
     };
 
     var result = dialog.show();
+    if (result === 2 && showIllustratorTarget) {
+        bringIllustratorTargetToFront(showIllustratorTarget);
+        return null;
+    }
     if (result !== 1 || !listBox.selection) return null;
     return listBox.selection.candidate;
 }
@@ -3383,8 +3394,10 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
     buttonRow.cancelButton.onClick = function () {
         savePrefsAndClose(0, false);
     };
+    var showIllustratorTarget = "";
     buttonRow.appButton.onClick = function () {
-        if (selectionHandle && selectInIllustrator(selectionHandle, true)) {
+        if (selectionHandle && selectInIllustrator(selectionHandle, false)) {
+            showIllustratorTarget = String(selectionHandle.bridgeTarget || "");
             savePrefsAndClose(2, false);
         }
     };
@@ -3410,7 +3423,8 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
     renderDialogState(true);
     usePrevArea.updateInfoLine();
 
-    var ok = (dlg.show() === 1);
+    var dialogResult = dlg.show();
+    var ok = (dialogResult === 1);
     if (ok) {
         var selectedState = collectSelectionState(ui);
         return {
@@ -3420,6 +3434,13 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
             trimmingMode: selectedState.trimmingMode,
             usePrev: !!usePrevArea.checkbox.value,
             cancelled: false
+        };
+    }
+    if (dialogResult === 2 && showIllustratorTarget) {
+        return {
+            usePrev: !!usePrevArea.checkbox.value,
+            cancelled: true,
+            showIllustratorTarget: showIllustratorTarget
         };
     }
     return {
