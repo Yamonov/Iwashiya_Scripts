@@ -8,16 +8,16 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_Illustrator_Resize
-Version=2.0
+Version=2.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=Illustrator配置に合わせてリサイズ・トリミング
 Author=Murakami Yoshiteru
-Release-Date=2026-08-10
+Release-Date=2026-08-12
 Target-App=Photoshop
 Description-BEGIN
 Photoshopで開いている画像を、Illustratorドキュメント上の配置サイズに合わせてリサイズします。
 
-配置したIllustratorドキュメントを開いておき、Photoshopから実行してください。
+各Illustratorで対象ドキュメントをアクティブにしておき、Photoshopから実行してください。
 
 トリミング処理は「伸ばし/トリミングを行わない」「伸ばして、トリム部分にガイドを引く（画像を削りません）」
 「伸ばして、トリム部分を切り抜く（クリッピングマスク外を削除します）」から選択できます。
@@ -1661,7 +1661,10 @@ function chooseInitialIllustratorCandidateInTarget(items, initialItem, warningLi
             placement: buildChooserPlacementHandle(candidate),
             pageName: candidate.pageName || "",
             displayWidthMM: candidate.displayWidthMM,
-            displayHeightMM: candidate.displayHeightMM
+            displayHeightMM: candidate.displayHeightMM,
+            pathMatches: candidate.pathMatches === true,
+            extensionMatches: candidate.extensionMatches === true,
+            extension: candidate.extension || ""
         });
         if (initialItem &&
                 String(candidate.itemUuid || "") === String(initialItem.itemUuid || "") &&
@@ -1768,7 +1771,10 @@ function main() {
     }
     var obj = initialResult.value;
     if (!obj || !obj.items || !obj.items.length) {
-        alert(localText("Illustratorで該当リンク画像が見つかりません。", "The matching linked image was not found in Illustrator."));
+        alert(localText(
+            "Illustratorのアクティブドキュメントで該当リンク画像が見つかりません。",
+            "The matching linked image was not found in the active Illustrator document."
+        ));
         return;
     }
 
@@ -1910,6 +1916,7 @@ function illustratorAdapter(request) {
     function discoverCandidates() {
         var targetPath = normalizePath(request && request.pathFs);
         var targetNameInfo = splitFileName(request && request.fileName);
+        var targetFolderPath = splitPath(targetPath).folderPath;
         if (!targetPath && !targetNameInfo.baseName) {
             return errorResponse(remoteText(
                 "Photoshop画像のパスを確認できません。",
@@ -1926,43 +1933,45 @@ function illustratorAdapter(request) {
         var hasFolderDifference = false;
         var hasExtensionDifference = false;
 
-        for (var documentIndex = 0; documentIndex < app.documents.length; documentIndex++) {
-            var document = app.documents[documentIndex];
-            var placedItems = document.placedItems;
-            for (var placedIndex = 0; placedIndex < placedItems.length; placedIndex++) {
-                var item = placedItems[placedIndex];
-                var fileInfo = readPlacedFileInfo(item);
-                if (!fileInfo.baseName) continue;
-                var isExact = !!targetPath && fileInfo.normalizedPath === targetPath;
-                var isNameOnly = !isExact && targetNameInfo.baseName &&
-                    fileInfo.baseName === targetNameInfo.baseName;
-                if (!isExact && !isNameOnly) continue;
-                if (isExact) exactMatchCount++;
-                else nameMatchCount++;
+        var document = app.activeDocument;
+        var documentIndex = -1;
+        var placedItems = document.placedItems;
+        for (var placedIndex = 0; placedIndex < placedItems.length; placedIndex++) {
+            var item = placedItems[placedIndex];
+            var fileInfo = readPlacedFileInfo(item);
+            if (!fileInfo.baseName) continue;
+            var isExact = !!targetPath && fileInfo.normalizedPath === targetPath;
+            var isNameOnly = !isExact && targetNameInfo.baseName &&
+                fileInfo.baseName === targetNameInfo.baseName;
+            if (!isExact && !isNameOnly) continue;
+            if (isExact) exactMatchCount++;
+            else nameMatchCount++;
 
-                try {
-                    var candidate = buildCandidateSnapshot(
-                        document,
-                        documentIndex,
-                        item,
-                        placedIndex,
-                        fileInfo
-                    );
-                    if (isExact) {
-                        exactEntries.push(candidate);
-                    } else {
-                        nameEntries.push(candidate);
-                        hasFolderDifference = hasFolderDifference ||
-                            fileInfo.folderPath !== splitPath(targetPath).folderPath;
-                        hasExtensionDifference = hasExtensionDifference ||
-                            fileInfo.extension !== targetNameInfo.extension;
-                    }
-                } catch (candidateError) {
-                    if (isExact && !firstExactCandidateError) {
-                        firstExactCandidateError = String(candidateError);
-                    } else if (!isExact && !firstNameCandidateError) {
-                        firstNameCandidateError = String(candidateError);
-                    }
+            try {
+                var candidate = buildCandidateSnapshot(
+                    document,
+                    documentIndex,
+                    item,
+                    placedIndex,
+                    fileInfo
+                );
+                candidate.pathMatches = fileInfo.folderPath === targetFolderPath;
+                candidate.extensionMatches = fileInfo.extension === targetNameInfo.extension;
+                candidate.extension = fileInfo.extension;
+                if (isExact) {
+                    exactEntries.push(candidate);
+                } else {
+                    nameEntries.push(candidate);
+                    hasFolderDifference = hasFolderDifference ||
+                        !candidate.pathMatches;
+                    hasExtensionDifference = hasExtensionDifference ||
+                        !candidate.extensionMatches;
+                }
+            } catch (candidateError) {
+                if (isExact && !firstExactCandidateError) {
+                    firstExactCandidateError = String(candidateError);
+                } else if (!isExact && !firstNameCandidateError) {
+                    firstNameCandidateError = String(candidateError);
                 }
             }
         }
@@ -2019,11 +2028,15 @@ function illustratorAdapter(request) {
         var columnTitles = [
             remoteText("連番", "No."),
             remoteText("アートボード", "Artboard"),
-            remoteText("サイズ", "Size")
+            remoteText("サイズ", "Size"),
+            remoteText("パス", "Path"),
+            remoteText("拡張子", "Extension")
         ];
         var orderValues = [columnTitles[0]];
         var pageValues = [columnTitles[1]];
         var sizeValues = [columnTitles[2]];
+        var pathValues = [columnTitles[3]];
+        var extensionValues = [columnTitles[4]];
         var rowData = [];
         for (var entryIndex = 0; entryIndex < entries.length; entryIndex++) {
             var entry = entries[entryIndex] || {};
@@ -2035,10 +2048,25 @@ function illustratorAdapter(request) {
                 sizeText = Number(entry.displayWidthMM).toFixed(2) + " × " +
                     Number(entry.displayHeightMM).toFixed(2) + " mm";
             }
-            rowData.push({order: order, page: pageText, size: sizeText});
+            var pathText = entry.pathMatches === true
+                ? "✓"
+                : remoteText("不一致", "Mismatch");
+            var extensionValue = String(entry.extension || "").replace(/^\.+/, "");
+            var extensionText = entry.extensionMatches === true
+                ? "✓"
+                : (extensionValue ? "." + extensionValue : "-");
+            rowData.push({
+                order: order,
+                page: pageText,
+                size: sizeText,
+                path: pathText,
+                extension: extensionText
+            });
             orderValues.push(order);
             pageValues.push(pageText);
             sizeValues.push(sizeText);
+            pathValues.push(pathText);
+            extensionValues.push(extensionText);
         }
 
         function measureColumnWidth(values, minimumWidth) {
@@ -2055,32 +2083,49 @@ function illustratorAdapter(request) {
         var columnWidths = [
             measureColumnWidth(orderValues, 54),
             measureColumnWidth(pageValues, 100),
-            measureColumnWidth(sizeValues, 180)
+            measureColumnWidth(sizeValues, 180),
+            measureColumnWidth(pathValues, 64),
+            measureColumnWidth(extensionValues, 90)
         ];
         var contentWidth = Math.max(440,
-            columnWidths[0] + columnWidths[1] + columnWidths[2] + 34);
+            columnWidths[0] + columnWidths[1] + columnWidths[2] +
+                columnWidths[3] + columnWidths[4] + 34);
+        function setCompactTextSize(control, textValue) {
+            var availableWidth = Math.max(1, contentWidth - 8);
+            var measuredWidth = String(textValue || "").length * 7;
+            try { measuredWidth = Number(dialog.graphics.measureString(String(textValue || ""))[0]); } catch (_textMeasureError) { }
+            if (!isFinite(measuredWidth) || measuredWidth < 0) measuredWidth = availableWidth;
+            var lineCount = Math.max(1, Math.ceil(measuredWidth / availableWidth));
+            control.preferredSize = [contentWidth, lineCount * 18];
+        }
+        var descriptionGroup = dialog.add("group");
+        descriptionGroup.orientation = "column";
+        descriptionGroup.alignChildren = ["fill", "top"];
+        descriptionGroup.spacing = 2;
+        descriptionGroup.margins = 0;
         var warningLines = request && request.warningLines instanceof Array
             ? request.warningLines
             : [];
         for (var lineIndex = 0; lineIndex < warningLines.length; lineIndex++) {
-            var messageLine = dialog.add("statictext", undefined,
-                String(warningLines[lineIndex] || ""), {multiline: true});
-            messageLine.preferredSize = [contentWidth, 34];
+            var warningText = String(warningLines[lineIndex] || "");
+            var messageLine = descriptionGroup.add("statictext", undefined, warningText, {multiline: true});
+            setCompactTextSize(messageLine, warningText);
         }
-        var explanation = dialog.add("statictext", undefined, remoteText(
+        var explanationText = remoteText(
             "ここで選択した同じ配置を、リサイズ・ガイド・切り抜き・XMPに使用します。",
             "The same selected placement will be used for resizing, guides, cropping, and XMP."
-        ), {multiline: true});
-        explanation.preferredSize = [contentWidth, 34];
-        var fileNameText = dialog.add("statictext", undefined,
+        );
+        var explanation = descriptionGroup.add("statictext", undefined, explanationText, {multiline: true});
+        setCompactTextSize(explanation, explanationText);
+        var fileNameValue =
             remoteText("ファイル名：", "File name: ") +
-                String(request && request.photoshopFileName ? request.photoshopFileName : "-"),
-            {multiline: true});
-        fileNameText.preferredSize = [contentWidth, 34];
+                String(request && request.photoshopFileName ? request.photoshopFileName : "-");
+        var fileNameText = descriptionGroup.add("statictext", undefined, fileNameValue, {multiline: true});
+        setCompactTextSize(fileNameText, fileNameValue);
 
         var listBox = dialog.add("listbox", undefined, [], {
             multiselect: false,
-            numberOfColumns: 3,
+            numberOfColumns: 5,
             showHeaders: true,
             columnTitles: columnTitles,
             columnWidths: columnWidths
@@ -2091,6 +2136,8 @@ function illustratorAdapter(request) {
             var row = listBox.add("item", rowData[rowIndex].order);
             row.subItems[0].text = rowData[rowIndex].page;
             row.subItems[1].text = rowData[rowIndex].size;
+            row.subItems[2].text = rowData[rowIndex].path;
+            row.subItems[3].text = rowData[rowIndex].extension;
             row.entry = entries[rowIndex];
         }
         listBox.selection = listBox.items[initialIndex];
@@ -2203,23 +2250,20 @@ function illustratorAdapter(request) {
     }
 
     function resolvePlacementHandle(handle) {
-        var matches = [];
+        var document = app.activeDocument;
+        var documentIndex = -1;
+        if (!documentMatchesHandle(document, handle)) return null;
         var expectedLinkPath = normalizePath(handle.linkPath || "");
-        for (var documentIndex = 0; documentIndex < app.documents.length; documentIndex++) {
-            var document = app.documents[documentIndex];
-            if (!documentMatchesHandle(document, handle)) continue;
-            var item = getItemByUuid(document, handle.itemUuid);
-            if (!item || safeTypename(item) !== "PlacedItem") continue;
-            var fileInfo = readPlacedFileInfo(item);
-            if (expectedLinkPath && fileInfo.normalizedPath !== expectedLinkPath) continue;
-            matches.push({
-                document: document,
-                documentIndex: documentIndex,
-                item: item,
-                placedIndex: findPlacedItemIndex(document, item)
-            });
-        }
-        return matches.length === 1 ? matches[0] : null;
+        var item = getItemByUuid(document, handle.itemUuid);
+        if (!item || safeTypename(item) !== "PlacedItem") return null;
+        var fileInfo = readPlacedFileInfo(item);
+        if (expectedLinkPath && fileInfo.normalizedPath !== expectedLinkPath) return null;
+        return {
+            document: document,
+            documentIndex: documentIndex,
+            item: item,
+            placedIndex: findPlacedItemIndex(document, item)
+        };
     }
 
     function documentMatchesHandle(document, handle) {
@@ -2845,7 +2889,12 @@ function illustratorAdapter(request) {
     }
 
     function previewCandidate(document, item) {
-        try { document.activate(); } catch (_activateDocumentError) { }
+        if (!document || document !== app.activeDocument) {
+            throw new Error(remoteText(
+                "Illustratorのアクティブドキュメントが変更されています。もう一度実行してください。",
+                "The active Illustrator document has changed. Run the script again."
+            ));
+        }
         try { document.selection = null; } catch (_clearSelectionError) { }
         var selectionItem = item;
         var maskDescriptor = findClippingMaskForPlacedItem(item);

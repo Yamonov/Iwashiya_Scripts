@@ -8,16 +8,16 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_InDesign_Resize
-Version=2.0
+Version=2.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=InDesign配置に合わせてリサイズ・トリミング
 Author=Murakami Yoshiteru
-Release-Date=2026-08-09
+Release-Date=2026-08-12
 Target-App=Photoshop
 Description-BEGIN
 Photoshopで開いている画像を、InDesignドキュメント上の配置サイズに合わせてリサイズします。
 
-配置したInDesignドキュメントを開いておき、Photoshopから実行してください。
+各InDesignで対象ドキュメントをアクティブにしておき、Photoshopから実行してください。
 
 トリミング処理は「伸ばし/トリミングを行わない」「伸ばして、トリム部分にガイドを引く（画像を削りません）」
 「伸ばして、トリム部分を切り抜く（フレーム外を削除します）」から選択できます。
@@ -1331,10 +1331,19 @@ function buildInitialCandidateRowData(item, index) {
     if (item && isFinite(Number(item.placedWmm)) && isFinite(Number(item.placedHmm))) {
         sizeText = Number(item.placedWmm).toFixed(2) + " × " + Number(item.placedHmm).toFixed(2) + " mm";
     }
+    var pathText = item && item.pathMatches === true
+        ? "✓"
+        : remoteText("不一致", "Mismatch");
+    var extensionValue = String(item && item.extension ? item.extension : "").replace(/^\.+/, "");
+    var extensionText = item && item.extensionMatches === true
+        ? "✓"
+        : (extensionValue ? "." + extensionValue : "-");
     return {
         order: order,
         page: pageText,
-        size: sizeText
+        size: sizeText,
+        path: pathText,
+        extension: extensionText
     };
 }
 
@@ -1519,7 +1528,10 @@ function main() {
     }
     var obj = initialResult.value;
     if (!obj || !obj.items || !obj.items.length) {
-        alert(localText("InDesignで該当リンク画像が見つかりません。", "The matching linked image was not found in InDesign."));
+        alert(localText(
+            "InDesignのアクティブドキュメントで該当リンク画像が見つかりません。",
+            "The matching linked image was not found in the active InDesign document."
+        ));
         return;
     }
 
@@ -2009,46 +2021,57 @@ function inDesignSide(targetInfo) {
     var nameOnlyItems = [];
     var hasFolderDifference = false;
     var hasExtensionDifference = false;
-    for (var documentIndex = 0; documentIndex < app.documents.length; documentIndex++) {
-        var doc = app.documents[documentIndex];
-        var links = doc.links;
-        var exactEntries = [];
-        var linkEntries = [];
-        for (var linkIndex = 0; linkIndex < links.length; linkIndex++) {
-            var entry = buildLinkEntry(doc, linkIndex, links[linkIndex]);
-            if (entry.rawFilePath === decodedRaw) {
-                exactEntries.push(entry);
-                continue;
+    var doc = app.activeDocument;
+    var links = doc.links;
+    var exactEntries = [];
+    var linkEntries = [];
+    for (var linkIndex = 0; linkIndex < links.length; linkIndex++) {
+        var entry = buildLinkEntry(doc, linkIndex, links[linkIndex]);
+        if (entry.rawFilePath === decodedRaw) {
+            exactEntries.push(entry);
+            continue;
+        }
+        linkEntries.push(entry);
+    }
+    for (var rawExactIndex = 0; rawExactIndex < exactEntries.length; rawExactIndex++) {
+        var rawExactEntry = exactEntries[rawExactIndex];
+        var rawExactPathInfo = getEntryRawPathInfo(rawExactEntry);
+        var rawExactItem = buildResolvedItem(rawExactEntry, rawExactPathInfo, rawExactEntry.rawFilePath);
+        rawExactItem.pathMatches = true;
+        rawExactItem.extensionMatches = true;
+        rawExactItem.extension = rawExactEntry.fileNameInfo.extension;
+        exactItems.push(rawExactItem);
+    }
+    var candidateEntries = [];
+    if (targetFileNameInfo.baseName) {
+        for (var rawIndex = 0; rawIndex < linkEntries.length; rawIndex++) {
+            var fileNameInfo = linkEntries[rawIndex].fileNameInfo;
+            if (fileNameInfo.baseName && fileNameInfo.baseName === targetFileNameInfo.baseName) {
+                candidateEntries.push(linkEntries[rawIndex]);
             }
-            linkEntries.push(entry);
         }
-        for (var rawExactIndex = 0; rawExactIndex < exactEntries.length; rawExactIndex++) {
-            var rawExactEntry = exactEntries[rawExactIndex];
-            exactItems.push(buildResolvedItem(rawExactEntry, getEntryRawPathInfo(rawExactEntry), rawExactEntry.rawFilePath));
+    }
+    for (var candidateIndex = 0; candidateIndex < candidateEntries.length; candidateIndex++) {
+        var candidateEntry = candidateEntries[candidateIndex];
+        var normalizedLinkPath = getEntryNormalizedPath(candidateEntry);
+        var pathInfo = getEntryNormalizedPathInfo(candidateEntry);
+        if (normalizedLinkPath === decodedNorm) {
+            var normalizedExactItem = buildResolvedItem(candidateEntry, pathInfo, normalizedLinkPath);
+            normalizedExactItem.pathMatches = true;
+            normalizedExactItem.extensionMatches = true;
+            normalizedExactItem.extension = candidateEntry.fileNameInfo.extension;
+            exactItems.push(normalizedExactItem);
+            continue;
         }
-        var candidateEntries = [];
-        if (targetFileNameInfo.baseName) {
-            for (var rawIndex = 0; rawIndex < linkEntries.length; rawIndex++) {
-                var fileNameInfo = linkEntries[rawIndex].fileNameInfo;
-                if (fileNameInfo.baseName && fileNameInfo.baseName === targetFileNameInfo.baseName) {
-                    candidateEntries.push(linkEntries[rawIndex]);
-                }
-            }
-        }
-        for (var candidateIndex = 0; candidateIndex < candidateEntries.length; candidateIndex++) {
-            var candidateEntry = candidateEntries[candidateIndex];
-            var normalizedLinkPath = getEntryNormalizedPath(candidateEntry);
-            var pathInfo = getEntryNormalizedPathInfo(candidateEntry);
-            if (normalizedLinkPath === decodedNorm) {
-                exactItems.push(buildResolvedItem(candidateEntry, pathInfo, normalizedLinkPath));
-                continue;
-            }
-            if (!targetFileNameInfo.baseName || !candidateEntry.fileNameInfo.baseName) continue;
-            if (targetFileNameInfo.baseName !== candidateEntry.fileNameInfo.baseName) continue;
-            if (targetPathInfo.folderPath !== pathInfo.folderPath) hasFolderDifference = true;
-            if (targetFileNameInfo.extension !== candidateEntry.fileNameInfo.extension) hasExtensionDifference = true;
-            nameOnlyItems.push(buildResolvedItem(candidateEntry, pathInfo, normalizedLinkPath));
-        }
+        if (!targetFileNameInfo.baseName || !candidateEntry.fileNameInfo.baseName) continue;
+        if (targetFileNameInfo.baseName !== candidateEntry.fileNameInfo.baseName) continue;
+        var nameOnlyItem = buildResolvedItem(candidateEntry, pathInfo, normalizedLinkPath);
+        nameOnlyItem.pathMatches = targetPathInfo.folderPath === pathInfo.folderPath;
+        nameOnlyItem.extensionMatches = targetFileNameInfo.extension === candidateEntry.fileNameInfo.extension;
+        nameOnlyItem.extension = candidateEntry.fileNameInfo.extension;
+        if (!nameOnlyItem.pathMatches) hasFolderDifference = true;
+        if (!nameOnlyItem.extensionMatches) hasExtensionDifference = true;
+        nameOnlyItems.push(nameOnlyItem);
     }
     if (exactItems.length) {
         return ({
@@ -2077,16 +2100,14 @@ function showInInDesignSide(handle) {
     if (app.documents.length === 0) {
         throw new Error("InDesign: " + remoteText("ドキュメントが開かれていません。", "No document is open."));
     }
-    var doc = null;
+    var doc = app.activeDocument;
     var requestedDocumentId = Number(handle && handle.documentId);
-    if (isFinite(requestedDocumentId)) {
-        try {
-            doc = app.documents.itemByID(requestedDocumentId);
-            if (!doc || doc.isValid === false) doc = null;
-        } catch (_documentByIdError) { doc = null; }
-    }
-    if (!doc) {
-        throw new Error("InDesign: " + remoteText("対象ドキュメントが見つかりません。", "The target document could not be found."));
+    if (!isFinite(requestedDocumentId) || !doc || doc.isValid === false ||
+            Number(doc.id) !== requestedDocumentId) {
+        throw new Error("InDesign: " + remoteText(
+            "アクティブドキュメントが変更されています。もう一度実行してください。",
+            "The active document has changed. Run the script again."
+        ));
     }
     if (handle && handle.documentPath) {
         var currentDocumentPath = "";
@@ -2202,18 +2223,24 @@ function chooseInitialInDesignCandidateInInDesignSide(request) {
     var columnTitles = [
         remoteText("連番", "No."),
         remoteText("ページ", "Page"),
-        remoteText("サイズ", "Size")
+        remoteText("サイズ", "Size"),
+        remoteText("パス", "Path"),
+        remoteText("拡張子", "Extension")
     ];
     var rowDataList = [];
     var orderValues = [columnTitles[0]];
     var pageValues = [columnTitles[1]];
     var sizeValues = [columnTitles[2]];
+    var pathValues = [columnTitles[3]];
+    var extensionValues = [columnTitles[4]];
     for (var rowDataIndex = 0; rowDataIndex < items.length; rowDataIndex++) {
         var rowData = buildInitialCandidateRowData(items[rowDataIndex], rowDataIndex);
         rowDataList.push(rowData);
         orderValues.push(rowData.order);
         pageValues.push(rowData.page);
         sizeValues.push(rowData.size);
+        pathValues.push(rowData.path);
+        extensionValues.push(rowData.extension);
     }
 
     function measureColumnWidth(values, minimumWidth) {
@@ -2234,29 +2261,48 @@ function chooseInitialInDesignCandidateInInDesignSide(request) {
     var columnWidths = [
         measureColumnWidth(orderValues, 54),
         measureColumnWidth(pageValues, 100),
-        measureColumnWidth(sizeValues, 180)
+        measureColumnWidth(sizeValues, 180),
+        measureColumnWidth(pathValues, 64),
+        measureColumnWidth(extensionValues, 90)
     ];
-    var listWidth = columnWidths[0] + columnWidths[1] + columnWidths[2] + 34;
+    var listWidth = columnWidths[0] + columnWidths[1] + columnWidths[2] +
+        columnWidths[3] + columnWidths[4] + 34;
     var contentWidth = Math.max(440, listWidth);
+    function setCompactTextSize(control, textValue) {
+        var availableWidth = Math.max(1, contentWidth - 8);
+        var measuredWidth = String(textValue || "").length * 7;
+        try {
+            measuredWidth = Number(dialog.graphics.measureString(String(textValue || ""))[0]);
+        } catch (_textMeasureError) { }
+        if (!isFinite(measuredWidth) || measuredWidth < 0) measuredWidth = availableWidth;
+        var lineCount = Math.max(1, Math.ceil(measuredWidth / availableWidth));
+        control.preferredSize = [contentWidth, lineCount * 18];
+    }
+    var descriptionGroup = dialog.add("group");
+    descriptionGroup.orientation = "column";
+    descriptionGroup.alignChildren = ["fill", "top"];
+    descriptionGroup.spacing = 2;
+    descriptionGroup.margins = 0;
 
     for (var lineIndex = 0; lineIndex < warningLines.length; lineIndex++) {
-        var messageLine = dialog.add("statictext", undefined, String(warningLines[lineIndex] || ""), { multiline: true });
-        messageLine.preferredSize = [contentWidth, 34];
+        var warningText = String(warningLines[lineIndex] || "");
+        var messageLine = descriptionGroup.add("statictext", undefined, warningText, { multiline: true });
+        setCompactTextSize(messageLine, warningText);
     }
-    var explanation = dialog.add("statictext", undefined, remoteText(
+    var explanationText = remoteText(
         "ここで選択した同じ配置を、リサイズ・ガイド・切り抜き・XMPに使用します。",
         "The same selected placement will be used for resizing, guides, cropping, and XMP."
-    ), { multiline: true });
-    explanation.preferredSize = [contentWidth, 34];
+    );
+    var explanation = descriptionGroup.add("statictext", undefined, explanationText, { multiline: true });
+    setCompactTextSize(explanation, explanationText);
 
-    var fileNameText = dialog.add("statictext", undefined,
-        remoteText("ファイル名：", "File name: ") + photoshopFileName,
-        { multiline: true });
-    fileNameText.preferredSize = [contentWidth, 34];
+    var fileNameValue = remoteText("ファイル名：", "File name: ") + photoshopFileName;
+    var fileNameText = descriptionGroup.add("statictext", undefined, fileNameValue, { multiline: true });
+    setCompactTextSize(fileNameText, fileNameValue);
 
     var listBox = dialog.add("listbox", undefined, [], {
         multiselect: false,
-        numberOfColumns: 3,
+        numberOfColumns: 5,
         showHeaders: true,
         columnTitles: columnTitles,
         columnWidths: columnWidths
@@ -2269,6 +2315,8 @@ function chooseInitialInDesignCandidateInInDesignSide(request) {
         var row = listBox.add("item", rowDataList[itemIndex].order);
         row.subItems[0].text = rowDataList[itemIndex].page;
         row.subItems[1].text = rowDataList[itemIndex].size;
+        row.subItems[2].text = rowDataList[itemIndex].path;
+        row.subItems[3].text = rowDataList[itemIndex].extension;
         row.candidateIndex = itemIndex;
         if (placementHandlesMatch(items[itemIndex].placement, initialHandle)) {
             initialIndex = itemIndex;
@@ -2383,7 +2431,10 @@ function chooseInitialInDesignCandidateInTarget(items, initialItem, warningLines
             placement: buildPlacementHandle(chooserCandidate),
             pageName: chooserCandidate.pageName || "",
             placedWmm: chooserCandidate.placedWmm,
-            placedHmm: chooserCandidate.placedHmm
+            placedHmm: chooserCandidate.placedHmm,
+            pathMatches: chooserCandidate.pathMatches === true,
+            extensionMatches: chooserCandidate.extensionMatches === true,
+            extension: chooserCandidate.extension || ""
         });
     }
     var chooserRequest = {
@@ -3300,11 +3351,12 @@ function sendToInDesign(placementSession) {
             }
 
             function resolveSelectedPlacement(session) {
-                var document = getValidItemById(app.documents, session.documentId);
-                if (!document) {
+                var document = app.activeDocument;
+                if (!document || document.isValid === false ||
+                        Number(document.id) !== Number(session.documentId)) {
                     throw new Error(remoteText(
-                        "選択したInDesignドキュメントが開かれていません。",
-                        "The selected InDesign document is no longer open."
+                        "InDesignのアクティブドキュメントが変更されています。もう一度実行してください。",
+                        "The active InDesign document has changed. Run the script again."
                     ));
                 }
                 if (session.documentPath && _normPath(getDocumentPath(document)) !== _normPath(String(session.documentPath))) {
