@@ -12,6 +12,12 @@ Version=0.5
 Script-ID=org.iwashi.OpenIllustratorLinksPanel
 Version=1
 
+Script-ID=org.iwashi.PreserveGuideVisibilityInPreview
+Version=1
+
+Script-ID=org.iwashi.RandomFillFromSelectedSwatches
+Version=1.1
+
 Script-ID=org.iwashi.ToggleGuide_ai
 Version=1
 
@@ -24,6 +30,13 @@ Version=1
 SCRIPTMETA-DIST-END
 
 # Changelog
+
+## org.iwashi.PreserveGuideVisibilityInPreview
+Ver 1:トリミング表示を切り替え、通常表示でガイドが表示されていた場合は切り替え後もガイドを表示する機能を追加。
+
+## org.iwashi.RandomFillFromSelectedSwatches
+Ver 1.1:塗りと線の選択、繰り返し適用、即時プレビュー、キャンセル時の実行前状態への復元に対応。
+Ver 1:複数選択したスウォッチから、選択オブジェクトの塗りをランダムに割り当てる機能を追加。
 
 ## keypadSettingsChager_Ai
 Ver 1.4:基準点表示を描画UIに変更し、クリック処理の重複実行を整理。
