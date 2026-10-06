@@ -3,6 +3,9 @@ SCRIPTMETA-DIST-BEGIN
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
 Version=2.3
 
+Script-ID=org.iwashi.CurledLine
+Version=1.0.0
+
 Script-ID=org.iwashi.IllustratorCrop_RelinkFitter
 Version=2
 
@@ -30,6 +33,9 @@ Version=1
 SCRIPTMETA-DIST-END
 
 # Changelog
+
+## org.iwashi.CurledLine
+Ver 1.0.0:3つのアンカーを持つ開いたパスを、途中で交差して輪を作る一本の線に変形する機能を追加。輪の幅、線幅、巻く方向と角度、両端の曲がり具合の調整、プレビューとキャンセル時の復元に対応。
 
 ## org.iwashi.PreserveGuideVisibilityInPreview
 Ver 1:トリミング表示を切り替え、通常表示でガイドが表示されていた場合は切り替え後もガイドを表示する機能を追加。
