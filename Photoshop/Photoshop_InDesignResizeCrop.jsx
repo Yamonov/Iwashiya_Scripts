@@ -8,7 +8,7 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_InDesign_Resize
-Version=2.1
+Version=2.2
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=InDesign配置に合わせてリサイズ・トリミング
 Author=Murakami Yoshiteru
@@ -144,6 +144,43 @@ function getPhotoshopDocumentId(doc) {
     return NaN;
 }
 
+function getImageGeometryChangeMessage() {
+    return localText(
+        "画像解像度・カンバスサイズの変更、または切り抜きを行ったドキュメントでは実行できません。保存し、InDesignのリンクを更新してから実行してください。",
+        "This script cannot run after changing the image size, resolution, or canvas size, or cropping the image. Save it, update the link in InDesign, and run the script again."
+    );
+}
+
+function canProcessPhotoshopDocument(doc) {
+    try {
+        if (doc.saved === true) return true;
+        var historyStates = doc.historyStates;
+        var activeHistoryState = doc.activeHistoryState;
+        var imageSizeName = localize("$$$/Actions/Event/ImageSize=Image Size");
+        var canvasSizeName = localize("$$$/Actions/Event/CanvasSize=Canvas Size");
+        var cropName = localize("$$$/Actions/Event/Crop=Crop");
+        // 現在位置までを調べ、取り消し済みの後続履歴は対象にしない。
+        for (var i = 0; i < historyStates.length; i++) {
+            var state = historyStates[i];
+            var name = state.name;
+            // この2スクリプトのリサイズは、独自名の1つの履歴にまとめられる。
+            if (!state.snapshot && (name === imageSizeName ||
+                    name === "画像解像度" || name === "Image Size" ||
+                    name === canvasSizeName || name === "カンバスサイズ" || name === "Canvas Size" ||
+                    name === cropName || name === "切り抜き" || name === "Crop" ||
+                    name === "InDesignに合わせてリサイズ・トリミング処理" ||
+                    name === "Resize and Trim to InDesign Placement" ||
+                    name === "Illustratorに合わせてリサイズ・トリミング処理" ||
+                    name === "Resize and Trim to Illustrator Placement")) {
+                return false;
+            }
+            if (state === activeHistoryState) return true;
+        }
+    } catch (_historyStateError) { }
+    // 現在の履歴を確認できない場合は、従来の未保存時の警告へ進む。
+    return false;
+}
+
 function createPhotoshopDocumentSession(doc) {
     if (!doc) {
         throw new Error(localText(
@@ -218,11 +255,8 @@ function assertPhotoshopDocumentSession(session) {
             "The target Photoshop document dimensions or resolution have changed."
         ));
     }
-    if (session.documentRef.saved !== true) {
-        throw new Error(localText(
-            "処理対象のPhotoshopドキュメントに未保存の変更があります。",
-            "The target Photoshop document has unsaved changes."
-        ));
+    if (!canProcessPhotoshopDocument(session.documentRef)) {
+        throw new Error(getImageGeometryChangeMessage());
     }
     return session.documentRef;
 }
@@ -312,6 +346,17 @@ function getHistoryStatusByName(doc, name) {
     }
 }
 
+function calculateResizePlan(placedWmm, placedHmm, docWidthPx, docHeightPx, targetPPI) {
+    var requiredWidthPx = Number(placedWmm) * Number(targetPPI) / 25.4;
+    var requiredHeightPx = Number(placedHmm) * Number(targetPPI) / 25.4;
+    var scaleRatio = Math.max(requiredWidthPx / docWidthPx, requiredHeightPx / docHeightPx);
+    return {
+        widthPx: Math.round(docWidthPx * scaleRatio),
+        heightPx: Math.round(docHeightPx * scaleRatio),
+        scaleRatio: scaleRatio
+    };
+}
+
 function performResizeFromCtx() {
     __HISTORY_DID_RUN__ = true;
     var ctx = __HISTORY_CTX__;
@@ -325,37 +370,26 @@ function performResizeFromCtx() {
     var newWidthPx = ctx.newWidthPx;
     var newHeightPx = ctx.newHeightPx;
     var targetPPI = ctx.targetPPI;
-    var scaleRatio = ctx.scaleRatio;
-    var upscaleMethod = ctx.upscaleMethod;
-    var downscaleMethod = ctx.downscaleMethod;
+    var isDownscale = ctx.scaleRatio < 1;
+    var method = isDownscale ? ctx.downscaleMethod : ctx.upscaleMethod;
     var trimmingMode = ctx.trimmingMode || TRIMMING_MODE_NONE;
 
-    if (scaleRatio < 1) {
-        // 縮小
-        if (downscaleMethod === "bicubic") {
-            doc.resizeImage(UnitValue(newWidthPx, "px"), UnitValue(newHeightPx, "px"), targetPPI, ResampleMethod.BICUBIC);
-        } else if (downscaleMethod === "nearestNeighbor") {
-            doc.resizeImage(UnitValue(newWidthPx, "px"), UnitValue(newHeightPx, "px"), targetPPI, ResampleMethod.NEARESTNEIGHBOR);
-        } else {
-            doc.resizeImage(UnitValue(newWidthPx, "px"), UnitValue(newHeightPx, "px"), targetPPI, ResampleMethod.BICUBIC);
-        }
+    if (!isDownscale && method === "deepUpscale") {
+        var desc = new ActionDescriptor();
+        desc.putUnitDouble(charIDToTypeID('Wdth'), charIDToTypeID('#Pxl'), newWidthPx);
+        desc.putUnitDouble(charIDToTypeID('Hght'), charIDToTypeID('#Pxl'), newHeightPx);
+        desc.putUnitDouble(charIDToTypeID('Rslt'), charIDToTypeID('#Rsl'), targetPPI);
+        desc.putBoolean(stringIDToTypeID('scaleStyles'), true);
+        desc.putEnumerated(charIDToTypeID('Intr'), charIDToTypeID('Intp'), stringIDToTypeID('deepUpscale'));
+        executeAction(charIDToTypeID('ImgS'), desc, DialogModes.NO);
     } else {
-        // 拡大
-        if (upscaleMethod === "deepUpscale") {
-            var desc = new ActionDescriptor();
-            desc.putUnitDouble(charIDToTypeID('Wdth'), charIDToTypeID('#Pxl'), newWidthPx);
-            desc.putUnitDouble(charIDToTypeID('Hght'), charIDToTypeID('#Pxl'), newHeightPx);
-            desc.putUnitDouble(charIDToTypeID('Rslt'), charIDToTypeID('#Rsl'), targetPPI);
-            desc.putBoolean(stringIDToTypeID('scaleStyles'), true);
-            desc.putEnumerated(charIDToTypeID('Intr'), charIDToTypeID('Intp'), stringIDToTypeID('deepUpscale'));
-            executeAction(charIDToTypeID('ImgS'), desc, DialogModes.NO);
-        } else if (upscaleMethod === "preserveDetails") {
-            doc.resizeImage(UnitValue(newWidthPx, "px"), UnitValue(newHeightPx, "px"), targetPPI, ResampleMethod.PRESERVEDETAILS);
-        } else if (upscaleMethod === "nearestNeighbor") {
-            doc.resizeImage(UnitValue(newWidthPx, "px"), UnitValue(newHeightPx, "px"), targetPPI, ResampleMethod.NEARESTNEIGHBOR);
-        } else {
-            doc.resizeImage(UnitValue(newWidthPx, "px"), UnitValue(newHeightPx, "px"), targetPPI, ResampleMethod.BICUBIC);
+        var resampleMethod = ResampleMethod.BICUBIC;
+        if (method === "nearestNeighbor") {
+            resampleMethod = ResampleMethod.NEARESTNEIGHBOR;
+        } else if (!isDownscale && method === "preserveDetails") {
+            resampleMethod = ResampleMethod.PRESERVEDETAILS;
         }
+        doc.resizeImage(UnitValue(newWidthPx, "px"), UnitValue(newHeightPx, "px"), targetPPI, resampleMethod);
     }
     if (trimmingMode !== TRIMMING_MODE_NONE) {
         if (!ctx.cropResponse) {
@@ -1016,10 +1050,6 @@ function finalizeInDesignResizeFlow(ctx) {
     var scaleDiff = Math.abs(hScale - vScale);
     var isUniformScale = scaleDiff <= 0.01;
 
-    function calcRequiredPixels(lengthMM, ppi) {
-        return Number(lengthMM) * Number(ppi) / 25.4;
-    }
-
     var ppiLine = isUniformScale
         ? localText("画像ppi: ", "Image ppi: ") + currentPPI + localText("（実効ppi: ", " (effective ppi: ") + effectivePPI.toFixed(2) + localText("）", ")") + "\n"
         : localText("画像ppi: ", "Image ppi: ") + currentPPI + localText("（実効ppi(最小): ", " (effective ppi, minimum: ") + effectivePPI.toFixed(2) + localText("）", ")") + "\n";
@@ -1035,20 +1065,13 @@ function finalizeInDesignResizeFlow(ctx) {
 
     var hasSmartObject = containsSmartObject(doc);
     var dialogResult = showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, docHeightPx, imgPath, hasSmartObject, effectivePPI, minPlacedPPI, maxPlacedPPI, ctx.matchedItemCount || 1, inDesignSelectionHandle, ctx.matchType === "nameOnly");
-    try {
-        if (dialogResult && dialogResult.hasOwnProperty('usePrev')) saveUsePrevOnly(dialogResult.usePrev);
-    } catch (_) { }
     if (!dialogResult || dialogResult.cancelled) return;
     var targetPPI = dialogResult.ppi;
     var upscaleMethod = dialogResult.method;
     var downscaleMethod = dialogResult.downMethod;
     var trimmingMode = dialogResult.trimmingMode || TRIMMING_MODE_NONE;
     var cropResponse = null;
-    var reqWpx = calcRequiredPixels(placedWmm, targetPPI);
-    var reqHpx = calcRequiredPixels(placedHmm, targetPPI);
-    var scaleRatio = Math.max(reqWpx / docWidthPx, reqHpx / docHeightPx);
-    var newWidthPx = Math.round(docWidthPx * scaleRatio);
-    var newHeightPx = Math.round(docHeightPx * scaleRatio);
+    var resizePlan = calculateResizePlan(placedWmm, placedHmm, docWidthPx, docHeightPx, targetPPI);
 
     try {
         cropResponse = getCropIntegration().prepare(doc, targetItem);
@@ -1087,10 +1110,10 @@ function finalizeInDesignResizeFlow(ctx) {
 
     __HISTORY_CTX__ = {
         photoshopSession: ctx.photoshopSession,
-        newWidthPx: newWidthPx,
-        newHeightPx: newHeightPx,
+        newWidthPx: resizePlan.widthPx,
+        newHeightPx: resizePlan.heightPx,
         targetPPI: targetPPI,
-        scaleRatio: scaleRatio,
+        scaleRatio: resizePlan.scaleRatio,
         upscaleMethod: upscaleMethod,
         downscaleMethod: downscaleMethod,
         trimmingMode: trimmingMode,
@@ -1482,13 +1505,8 @@ function main() {
         return;
     }
     var doc = app.activeDocument;
-    var isSaved = false;
-    try { isSaved = doc.saved === true; } catch (_savedStateError) {}
-    if (!isSaved) {
-        alert(localText(
-            "未保存の変更があるドキュメントでは実行できません。保存し、InDesignのリンクを更新してから実行してください。",
-            "This script cannot run while the document has unsaved changes. Save it, update the link in InDesign, and run the script again."
-        ));
+    if (!canProcessPhotoshopDocument(doc)) {
+        alert(getImageGeometryChangeMessage());
         return;
     }
 
@@ -1886,21 +1904,8 @@ function inDesignSide(targetInfo) {
         return Math.sqrt(dx * dx + dy * dy);
     }
 
-    function getPlacedImageSizeMM(graphicItem) {
-        try {
-            var topLeft = resolveSpreadPoint(graphicItem, AnchorPoint.TOP_LEFT_ANCHOR);
-            var topRight = resolveSpreadPoint(graphicItem, AnchorPoint.TOP_RIGHT_ANCHOR);
-            var bottomLeft = resolveSpreadPoint(graphicItem, AnchorPoint.BOTTOM_LEFT_ANCHOR);
-            return {
-                width: pointDistance(topLeft, topRight) * 25.4 / 72,
-                height: pointDistance(topLeft, bottomLeft) * 25.4 / 72
-            };
-        } catch (_placedSizeError) {
-            return { width: 0, height: 0 };
-        }
-    }
-
-    function getPlacementGeometryFingerprint(graphicItem) {
+    function getPlacementGeometry(graphicItem) {
+        var geometry = {widthMM: 0, heightMM: 0, fingerprint: null};
         var frameItem = graphicItem;
         try {
             if (graphicItem.parent && graphicItem.parent.allGraphics !== undefined) {
@@ -1918,21 +1923,27 @@ function inDesignSide(targetInfo) {
         }
 
         try {
-            return {
-                graphicQuad: getQuad(graphicItem),
-                frameQuad: getQuad(frameItem)
+            var topLeft = resolveSpreadPoint(graphicItem, AnchorPoint.TOP_LEFT_ANCHOR);
+            var topRight = resolveSpreadPoint(graphicItem, AnchorPoint.TOP_RIGHT_ANCHOR);
+            var bottomLeft = resolveSpreadPoint(graphicItem, AnchorPoint.BOTTOM_LEFT_ANCHOR);
+            geometry.widthMM = pointDistance(topLeft, topRight) * 25.4 / 72;
+            geometry.heightMM = pointDistance(topLeft, bottomLeft) * 25.4 / 72;
+            // サイズ取得済みの3隅を再利用する。残りの取得が失敗しても、サイズは保持する。
+            var graphicQuad = [topLeft, topRight,
+                resolveSpreadPoint(graphicItem, AnchorPoint.BOTTOM_RIGHT_ANCHOR), bottomLeft];
+            geometry.fingerprint = {
+                graphicQuad: graphicQuad,
+                frameQuad: frameItem === graphicItem ? graphicQuad : getQuad(frameItem)
             };
-        } catch (_fingerprintError) {
-            return null;
-        }
+        } catch (_geometryError) {}
+        return geometry;
     }
 
     function buildItemObject(entry, hScale, vScale, pathInfo, displayPathInfo, resolvedPath) {
         var displayFileName = (displayPathInfo && displayPathInfo.fileName) ? displayPathInfo.fileName : pathInfo.fileName;
         var displayFolderPath = (displayPathInfo && displayPathInfo.folderPath) ? displayPathInfo.folderPath : pathInfo.folderPath;
         var documentInfo = buildDocumentInfo(entry.document);
-        var placedSize = getPlacedImageSizeMM(entry.link.parent);
-        var geometryFingerprint = getPlacementGeometryFingerprint(entry.link.parent);
+        var placementGeometry = getPlacementGeometry(entry.link.parent);
         var linkStatus = entry.status;
         if (linkStatus == null) {
             linkStatus = getLinkStatusCode(entry.link);
@@ -1941,8 +1952,8 @@ function inDesignSide(targetInfo) {
         return {
             hScale: hScale,
             vScale: vScale,
-            placedWmm: placedSize.width,
-            placedHmm: placedSize.height,
+            placedWmm: placementGeometry.widthMM,
+            placedHmm: placementGeometry.heightMM,
             linkStatus: linkStatus,
             linkId: getObjectId(entry.link),
             itemId: getObjectId(entry.link.parent),
@@ -1952,7 +1963,7 @@ function inDesignSide(targetInfo) {
             documentPath: documentInfo.documentPath,
             applicationVersion: documentInfo.applicationVersion,
             pageName: getPageName(entry.link.parent),
-            geometryFingerprint: geometryFingerprint,
+            geometryFingerprint: placementGeometry.fingerprint,
             linkIndex: entry.linkIndex,
             fileName: displayFileName,
             folderPath: displayFolderPath,
@@ -2399,6 +2410,14 @@ function findInDesignCandidateByHandle(items, handle) {
 }
 
 // Photoshop側: 選択済みのInDesignバージョングループに候補選択を依頼する。
+function buildInjectedInDesignPreviewSource() {
+    return showInInDesignSide.toString()
+        .replace("/*__INJECT_HELPERS__*/",
+            "var toNFCJa = " + NFC_HELPER_SRC + ";\n" +
+            "var _normPath = " + NORM_HELPER_SRC_ID + ";\n" +
+            "var getInDesignParentPage = " + INDESIGN_PARENT_PAGE_HELPER_SRC + ";");
+}
+
 function chooseInitialInDesignCandidateInTarget(items, initialItem, warningLines, photoshopFileName) {
     if (!items || !items.length) return null;
     if (items.length === 1) return items[0];
@@ -2418,11 +2437,7 @@ function chooseInitialInDesignCandidateInTarget(items, initialItem, warningLines
         }
     }
 
-    var showSource = showInInDesignSide.toString()
-        .replace("/*__INJECT_HELPERS__*/",
-            "var toNFCJa = " + NFC_HELPER_SRC + ";\n" +
-            "var _normPath = " + NORM_HELPER_SRC_ID + ";\n" +
-            "var getInDesignParentPage = " + INDESIGN_PARENT_PAGE_HELPER_SRC + ";");
+    var showSource = buildInjectedInDesignPreviewSource();
     var chooserSource = chooseInitialInDesignCandidateInInDesignSide.toString();
     var chooserEntries = [];
     for (var chooserIndex = 0; chooserIndex < items.length; chooserIndex++) {
@@ -2493,11 +2508,7 @@ function selectInInDesign(handle, bringApplicationToFront) {
         alert(localText("対象のInDesignを確認できません。", "The target InDesign application could not be verified."));
         return false;
     }
-    var showSrc = showInInDesignSide.toString()
-        .replace("/*__INJECT_HELPERS__*/",
-            "var toNFCJa = " + NFC_HELPER_SRC + ";\n" +
-            "var _normPath = " + NORM_HELPER_SRC_ID + ";\n" +
-            "var getInDesignParentPage = " + INDESIGN_PARENT_PAGE_HELPER_SRC + ";");
+    var showSrc = buildInjectedInDesignPreviewSource();
     var showBody = "(" +
         "function(){" +
         "var remoteLocaleCode = " + toSourceLiteral(currentLocaleCode()) + ";" +
@@ -2650,24 +2661,6 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
         };
     }
 
-    function buildMethodPanel(dlg, title, labels, values, initialValue) {
-        var panel = dlg.add("panel", undefined, title);
-        panel.orientation = "row";
-        panel.alignChildren = ["left", "center"];
-        panel.spacing = 0;
-        panel.margins = [10, 12, 10, 12];
-        var buttons = [];
-        for (var i = 0; i < labels.length; i++) {
-            var button = panel.add("radiobutton", undefined, buildPaddedLabel(labels[i]));
-            button.value = (values[i] === initialValue);
-            buttons.push(button);
-        }
-        return {
-            panel: panel,
-            buttons: buttons
-        };
-    }
-
     function buildTrimmingPanel(dlg) {
         var labels = [
             localText("伸ばし/トリミングを行わない", "Do not extend or trim"),
@@ -2806,69 +2799,68 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
         };
     }
 
+    function findValueIndex(values, value) {
+        for (var index = 0; index < values.length; index++) {
+            if (values[index] === value) return index;
+        }
+        return -1;
+    }
+
+    function getSelectedRadioIndex(buttons) {
+        for (var index = 0; index < buttons.length; index++) {
+            if (buttons[index].value) return index;
+        }
+        return -1;
+    }
+
+    function getSelectedRadioValue(group, defaultValue) {
+        var index = getSelectedRadioIndex(group.buttons);
+        return index >= 0 ? group.values[index] : defaultValue;
+    }
+
+    function selectRadioIndex(buttons, selectedIndex) {
+        for (var index = 0; index < buttons.length; index++) {
+            buttons[index].value = (index === selectedIndex);
+        }
+    }
+
     function collectSelectionState(ui) {
-        var selectedRadioIndex = 0;
-        var selectedUpscaleMethod = "deepUpscale";
-        var selectedDownscaleMethod = "bicubic";
-        var selectedTrimmingMode = TRIMMING_MODE_NONE;
-
-        for (var i = 0; i < ui.resolution.buttons.length; i++) {
-            if (ui.resolution.buttons[i].value) {
-                selectedRadioIndex = i;
-                break;
-            }
-        }
-        for (var j = 0; j < ui.upscale.buttons.length; j++) {
-            if (ui.upscale.buttons[j].value) {
-                selectedUpscaleMethod = ui.upscale.values[j];
-                break;
-            }
-        }
-        for (var k = 0; k < ui.downscale.buttons.length; k++) {
-            if (ui.downscale.buttons[k].value) {
-                selectedDownscaleMethod = ui.downscale.values[k];
-                break;
-            }
-        }
-        for (var trimmingIndex = 0; trimmingIndex < ui.trimming.buttons.length; trimmingIndex++) {
-            if (ui.trimming.buttons[trimmingIndex].value) {
-                selectedTrimmingMode = ui.trimming.values[trimmingIndex];
-                break;
-            }
-        }
-
+        var radioIndex = getSelectedRadioIndex(ui.resolution.buttons);
+        if (radioIndex < 0) radioIndex = 0;
         return {
-            radioIndex: selectedRadioIndex,
-            ppi: targetPPIList[selectedRadioIndex],
-            method: selectedUpscaleMethod,
-            downMethod: selectedDownscaleMethod,
-            trimmingMode: selectedTrimmingMode
+            radioIndex: radioIndex,
+            ppi: targetPPIList[radioIndex],
+            method: getSelectedRadioValue(ui.upscale, "deepUpscale"),
+            downMethod: getSelectedRadioValue(ui.downscale, "bicubic"),
+            trimmingMode: getSelectedRadioValue(ui.trimming, TRIMMING_MODE_NONE)
         };
     }
 
     function applySelectionState(ui, state, skipRedraw) {
         var validIndex = (state.radioIndex >= 0 && state.radioIndex < ui.resolution.buttons.length) ? state.radioIndex : 0;
-        for (var i = 0; i < ui.resolution.buttons.length; i++) ui.resolution.buttons[i].value = (i === validIndex);
-        for (var j = 0; j < ui.upscale.buttons.length; j++) ui.upscale.buttons[j].value = (ui.upscale.values[j] === state.upscaleMethod);
-        for (var k = 0; k < ui.downscale.buttons.length; k++) ui.downscale.buttons[k].value = (ui.downscale.values[k] === state.downMethod);
+        selectRadioIndex(ui.resolution.buttons, validIndex);
+        selectRadioIndex(ui.upscale.buttons, findValueIndex(ui.upscale.values, state.upscaleMethod));
+        selectRadioIndex(ui.downscale.buttons, findValueIndex(ui.downscale.values, state.downMethod));
         renderDialogState(skipRedraw === true);
     }
 
     function setControlsEnabled(ui, isEnabled) {
+        var groups = [ui.resolution, ui.upscale, ui.downscale];
         try {
-            ui.resolution.panel.enabled = isEnabled;
-            ui.upscale.panel.enabled = isEnabled;
-            ui.downscale.panel.enabled = isEnabled;
+            for (var groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+                groups[groupIndex].panel.enabled = isEnabled;
+            }
         } catch (e) { }
-        for (var i = 0; i < ui.resolution.buttons.length; i++) ui.resolution.buttons[i].enabled = isEnabled;
-        for (var j = 0; j < ui.upscale.buttons.length; j++) ui.upscale.buttons[j].enabled = isEnabled;
-        for (var k = 0; k < ui.downscale.buttons.length; k++) ui.downscale.buttons[k].enabled = isEnabled;
+        for (var index = 0; index < groups.length; index++) {
+            var buttons = groups[index].buttons;
+            for (var buttonIndex = 0; buttonIndex < buttons.length; buttonIndex++) {
+                buttons[buttonIndex].enabled = isEnabled;
+            }
+        }
     }
 
     function computeDialogState(selectionState, historyWarning) {
-        var requiredW = placedWmm * selectionState.ppi / 25.4;
-        var requiredH = placedHmm * selectionState.ppi / 25.4;
-        var scale = Math.max(requiredW / docWidthPx, requiredH / docHeightPx);
+        var scale = calculateResizePlan(placedWmm, placedHmm, docWidthPx, docHeightPx, selectionState.ppi).scaleRatio;
         var scalePct = scale * 100;
         var warningBag = createWarningBag();
         addWarning(warningBag, WARN_STYLE_DEFAULT_NORMAL, hasSmartObject ? SMART_OBJECT_INTERP_WARNING : "");
@@ -2949,8 +2941,8 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
     ui.info = buildInfoPanel(dlg, messageBase);
 
     ui.resolution = buildRadioPanel(dlg, localText("指定解像度", "Target Resolution"), resolutionLabels, initialState.radioIndex);
-    ui.upscale = buildMethodPanel(dlg, localText("拡大メソッド", "Upscale Method"), methodLabels, methodValues, initialState.upscaleMethod);
-    ui.downscale = buildMethodPanel(dlg, localText("縮小メソッド", "Downscale Method"), downMethodLabels, downMethodValues, initialState.downMethod);
+    ui.upscale = buildRadioPanel(dlg, localText("拡大メソッド", "Upscale Method"), methodLabels, findValueIndex(methodValues, initialState.upscaleMethod));
+    ui.downscale = buildRadioPanel(dlg, localText("縮小メソッド", "Downscale Method"), downMethodLabels, findValueIndex(downMethodValues, initialState.downMethod));
     ui.upscale.values = methodValues;
     ui.downscale.values = downMethodValues;
     ui.trimming = buildTrimmingPanel(dlg);
@@ -2985,32 +2977,19 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
     };
     setControlsEnabled(ui, !usePrevArea.checkbox.value);
 
-    function savePrefsAndClose(exitCode, saveAll) {
-        try {
-            if (saveAll) {
-                var selected = collectSelectionState(ui);
-                savePrefs({
-                    usePrev: usePrevArea.checkbox.value === true,
-                    radioIndex: selected.radioIndex,
-                    upscaleMethod: selected.method,
-                    downMethod: selected.downMethod
-                });
-            } else {
-                saveUsePrevOnly(usePrevArea.checkbox.value);
-            }
-        } catch (e) { }
+    function closeDialog(exitCode) {
         try {
             dlg.close(exitCode);
-        } catch (e2) {
+        } catch (e) {
             dlg.close();
         }
     }
 
     buttonRow.okButton.onClick = function () {
-        savePrefsAndClose(1, true);
+        closeDialog(1);
     };
     buttonRow.cancelButton.onClick = function () {
-        savePrefsAndClose(0, false);
+        closeDialog(0);
     };
     buttonRow.appButton.onClick = function () {
         if (selectInInDesign(selectionHandle || {
@@ -3018,12 +2997,12 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
             pathFs: encodeURI(imgPath),
             items: []
         }, true)) {
-            savePrefsAndClose(2, false);
+            closeDialog(2);
         }
     };
     buttonRow.helpButton.onClick = function () {
         openURLInBrowser("https://gist.github.com/Yamonov/d06d117b56445e52b30764b9c994356c");
-        savePrefsAndClose(0, false);
+        closeDialog(0);
     };
 
     dlg.addEventListener("keydown", function (k) {
@@ -3043,20 +3022,34 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
     renderDialogState(true);
     usePrevArea.updateInfoLine();
 
-    var ok = (dlg.show() === 1);
-    if (ok) {
-        var selectedState = collectSelectionState(ui);
+    var dialogResult = dlg.show();
+    var selectedState = dialogResult === 1 ? collectSelectionState(ui) : null;
+    var usePrev = !!usePrevArea.checkbox.value;
+    // ボタン、Esc、ウィンドウを閉じる操作のいずれでも、設定はここで一度だけ保存する。
+    try {
+        if (selectedState) {
+            savePrefs({
+                usePrev: usePrev,
+                radioIndex: selectedState.radioIndex,
+                upscaleMethod: selectedState.method,
+                downMethod: selectedState.downMethod
+            });
+        } else {
+            saveUsePrevOnly(usePrev);
+        }
+    } catch (e) { }
+    if (selectedState) {
         return {
             ppi: selectedState.ppi,
             method: selectedState.method,
             downMethod: selectedState.downMethod,
             trimmingMode: selectedState.trimmingMode,
-            usePrev: !!usePrevArea.checkbox.value,
+            usePrev: usePrev,
             cancelled: false
         };
     }
     return {
-        usePrev: !!usePrevArea.checkbox.value,
+        usePrev: usePrev,
         cancelled: true
     };
 }
@@ -3506,8 +3499,8 @@ function sendToInDesign(placementSession) {
             // 座標計算
             function buildCandidateGeometry(item, parentItem) {
                 var imageGeometry = getRectangleGeometry(item);
-                var frameGeometry = getFrameGeometry(parentItem);
                 var framePoints = getRectangleQuad(parentItem);
+                var frameGeometry = buildGeometryFromQuadPoints(framePoints);
                 var localFrameBounds = getProjectedImageBounds(framePoints, imageGeometry);
 
                 return {
@@ -3567,18 +3560,7 @@ function sendToInDesign(placementSession) {
             function getRectangleGeometry(item) {
                 var pointSet = collectRectanglePointSet(item);
                 var corners = getImageCornerPoints(pointSet.spreadPoints, pointSet.pointIndexMap);
-                return buildGeometryFromCornerPoints(corners);
-            }
-
-            function buildGeometryFromCornerPoints(corners) {
-                var imageAxes = buildImageAxes(corners.topLeft, corners.topRight, corners.bottomLeft);
-                return {
-                    topLeftSpread: corners.topLeft,
-                    axisX: imageAxes.axisX,
-                    axisY: imageAxes.axisY,
-                    width: imageAxes.width,
-                    height: imageAxes.height
-                };
+                return buildGeometryFromQuad(corners.topLeft, corners.topRight, corners.bottomLeft);
             }
 
             function getExpandedLocalRect(localFrameBounds, imageGeometry) {
@@ -3605,25 +3587,9 @@ function sendToInDesign(placementSession) {
                 };
             }
 
-            function buildImageAxes(topLeftSpread, topRightSpread, bottomLeftSpread) {
-                var horizontalVector = subtractPoints(topRightSpread, topLeftSpread);
-                var verticalVector = subtractPoints(bottomLeftSpread, topLeftSpread);
-
-                return {
-                    axisX: normalizeVector(horizontalVector),
-                    axisY: normalizeVector(verticalVector),
-                    width: vectorLength(horizontalVector),
-                    height: vectorLength(verticalVector)
-                };
-            }
-
             function getRectangleQuad(item) {
                 var pointSet = collectRectanglePointSet(item);
                 return reorderRectanglePoints(pointSet.spreadPoints, pointSet.pointIndexMap);
-            }
-
-            function getFrameGeometry(parentItem) {
-                return buildGeometryFromQuadPoints(getRectangleQuad(parentItem));
             }
 
             function toNumberPoint(value) {
@@ -3828,7 +3794,6 @@ function sendToInDesign(placementSession) {
             function ptToMm(value) {
                 return getNumber(value) * 25.4 / 72;
             }
-
 
             function serializeCandidate(candidate) {
                 return {
@@ -4275,7 +4240,6 @@ return {
     writeMetadata: writeMetadata
 };
 }
-
 
 // 実行開始
 main();

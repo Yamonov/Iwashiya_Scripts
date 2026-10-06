@@ -8,7 +8,7 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_Illustrator_Resize
-Version=2.1
+Version=2.2
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=Illustrator配置に合わせてリサイズ・トリミング
 Author=Murakami Yoshiteru
@@ -149,6 +149,43 @@ function getPhotoshopDocumentId(doc) {
     return NaN;
 }
 
+function getImageGeometryChangeMessage() {
+    return localText(
+        "画像解像度・カンバスサイズの変更、または切り抜きを行ったドキュメントでは実行できません。保存し、Illustratorのリンクを更新してから実行してください。",
+        "This script cannot run after changing the image size, resolution, or canvas size, or cropping the image. Save it, update the link in Illustrator, and run the script again."
+    );
+}
+
+function canProcessPhotoshopDocument(doc) {
+    try {
+        if (doc.saved === true) return true;
+        var historyStates = doc.historyStates;
+        var activeHistoryState = doc.activeHistoryState;
+        var imageSizeName = localize("$$$/Actions/Event/ImageSize=Image Size");
+        var canvasSizeName = localize("$$$/Actions/Event/CanvasSize=Canvas Size");
+        var cropName = localize("$$$/Actions/Event/Crop=Crop");
+        // 現在位置までを調べ、取り消し済みの後続履歴は対象にしない。
+        for (var i = 0; i < historyStates.length; i++) {
+            var state = historyStates[i];
+            var name = state.name;
+            // この2スクリプトのリサイズは、独自名の1つの履歴にまとめられる。
+            if (!state.snapshot && (name === imageSizeName ||
+                    name === "画像解像度" || name === "Image Size" ||
+                    name === canvasSizeName || name === "カンバスサイズ" || name === "Canvas Size" ||
+                    name === cropName || name === "切り抜き" || name === "Crop" ||
+                    name === "InDesignに合わせてリサイズ・トリミング処理" ||
+                    name === "Resize and Trim to InDesign Placement" ||
+                    name === "Illustratorに合わせてリサイズ・トリミング処理" ||
+                    name === "Resize and Trim to Illustrator Placement")) {
+                return false;
+            }
+            if (state === activeHistoryState) return true;
+        }
+    } catch (_historyStateError) { }
+    // 現在の履歴を確認できない場合は、従来の未保存時の警告へ進む。
+    return false;
+}
+
 function createPhotoshopDocumentSession(doc) {
     if (!doc) {
         throw new Error(localText(
@@ -223,11 +260,8 @@ function assertPhotoshopDocumentSession(session) {
             "The target Photoshop document dimensions or resolution have changed."
         ));
     }
-    if (session.documentRef.saved !== true) {
-        throw new Error(localText(
-            "処理対象のPhotoshopドキュメントに未保存の変更があります。",
-            "The target Photoshop document has unsaved changes."
-        ));
+    if (!canProcessPhotoshopDocument(session.documentRef)) {
+        throw new Error(getImageGeometryChangeMessage());
     }
     return session.documentRef;
 }
@@ -349,6 +383,17 @@ function getHistoryStatusByName(doc, name) {
     }
 }
 
+function calculateResizePlan(placedWmm, placedHmm, docWidthPx, docHeightPx, targetPPI) {
+    var requiredWidthPx = Number(placedWmm) * Number(targetPPI) / 25.4;
+    var requiredHeightPx = Number(placedHmm) * Number(targetPPI) / 25.4;
+    var scaleRatio = Math.max(requiredWidthPx / docWidthPx, requiredHeightPx / docHeightPx);
+    return {
+        widthPx: Math.round(docWidthPx * scaleRatio),
+        heightPx: Math.round(docHeightPx * scaleRatio),
+        scaleRatio: scaleRatio
+    };
+}
+
 function performResizeFromCtx() {
     __HISTORY_DID_RUN__ = true;
     var ctx = __HISTORY_CTX__;
@@ -362,37 +407,26 @@ function performResizeFromCtx() {
     var newWidthPx = ctx.newWidthPx;
     var newHeightPx = ctx.newHeightPx;
     var targetPPI = ctx.targetPPI;
-    var scaleRatio = ctx.scaleRatio;
-    var upscaleMethod = ctx.upscaleMethod;
-    var downscaleMethod = ctx.downscaleMethod;
+    var isDownscale = ctx.scaleRatio < 1;
+    var method = isDownscale ? ctx.downscaleMethod : ctx.upscaleMethod;
     var trimmingMode = ctx.trimmingMode || TRIMMING_MODE_NONE;
 
-    if (scaleRatio < 1) {
-        // 縮小
-        if (downscaleMethod === "bicubic") {
-            doc.resizeImage(UnitValue(newWidthPx, "px"), UnitValue(newHeightPx, "px"), targetPPI, ResampleMethod.BICUBIC);
-        } else if (downscaleMethod === "nearestNeighbor") {
-            doc.resizeImage(UnitValue(newWidthPx, "px"), UnitValue(newHeightPx, "px"), targetPPI, ResampleMethod.NEARESTNEIGHBOR);
-        } else {
-            doc.resizeImage(UnitValue(newWidthPx, "px"), UnitValue(newHeightPx, "px"), targetPPI, ResampleMethod.BICUBIC);
-        }
+    if (!isDownscale && method === "deepUpscale") {
+        var desc = new ActionDescriptor();
+        desc.putUnitDouble(charIDToTypeID('Wdth'), charIDToTypeID('#Pxl'), newWidthPx);
+        desc.putUnitDouble(charIDToTypeID('Hght'), charIDToTypeID('#Pxl'), newHeightPx);
+        desc.putUnitDouble(charIDToTypeID('Rslt'), charIDToTypeID('#Rsl'), targetPPI);
+        desc.putBoolean(stringIDToTypeID('scaleStyles'), true);
+        desc.putEnumerated(charIDToTypeID('Intr'), charIDToTypeID('Intp'), stringIDToTypeID('deepUpscale'));
+        executeAction(charIDToTypeID('ImgS'), desc, DialogModes.NO);
     } else {
-        // 拡大
-        if (upscaleMethod === "deepUpscale") {
-            var desc = new ActionDescriptor();
-            desc.putUnitDouble(charIDToTypeID('Wdth'), charIDToTypeID('#Pxl'), newWidthPx);
-            desc.putUnitDouble(charIDToTypeID('Hght'), charIDToTypeID('#Pxl'), newHeightPx);
-            desc.putUnitDouble(charIDToTypeID('Rslt'), charIDToTypeID('#Rsl'), targetPPI);
-            desc.putBoolean(stringIDToTypeID('scaleStyles'), true);
-            desc.putEnumerated(charIDToTypeID('Intr'), charIDToTypeID('Intp'), stringIDToTypeID('deepUpscale'));
-            executeAction(charIDToTypeID('ImgS'), desc, DialogModes.NO);
-        } else if (upscaleMethod === "preserveDetails") {
-            doc.resizeImage(UnitValue(newWidthPx, "px"), UnitValue(newHeightPx, "px"), targetPPI, ResampleMethod.PRESERVEDETAILS);
-        } else if (upscaleMethod === "nearestNeighbor") {
-            doc.resizeImage(UnitValue(newWidthPx, "px"), UnitValue(newHeightPx, "px"), targetPPI, ResampleMethod.NEARESTNEIGHBOR);
-        } else {
-            doc.resizeImage(UnitValue(newWidthPx, "px"), UnitValue(newHeightPx, "px"), targetPPI, ResampleMethod.BICUBIC);
+        var resampleMethod = ResampleMethod.BICUBIC;
+        if (method === "nearestNeighbor") {
+            resampleMethod = ResampleMethod.NEARESTNEIGHBOR;
+        } else if (!isDownscale && method === "preserveDetails") {
+            resampleMethod = ResampleMethod.PRESERVEDETAILS;
         }
+        doc.resizeImage(UnitValue(newWidthPx, "px"), UnitValue(newHeightPx, "px"), targetPPI, resampleMethod);
     }
     if (trimmingMode !== TRIMMING_MODE_NONE) {
         if (!ctx.cropResponse) {
@@ -1170,10 +1204,6 @@ function finalizeIllustratorResizeFlow(ctx) {
     var scaleDiff = Math.abs(hScale - vScale);
     var isUniformScale = scaleDiff <= 0.01;
 
-    function calcRequiredPixels(lengthMM, ppi) {
-        return Number(lengthMM) * Number(ppi) / 25.4;
-    }
-
     var ppiLine = isUniformScale
         ? localText("画像ppi: ", "Image ppi: ") + currentPPI + localText("（実効ppi: ", " (effective ppi: ") + effectivePPI.toFixed(2) + localText("）", ")") + "\n"
         : localText("画像ppi: ", "Image ppi: ") + currentPPI + localText("（実効ppi(最小): ", " (effective ppi, minimum: ") + effectivePPI.toFixed(2) + localText("）", ")") + "\n";
@@ -1205,9 +1235,6 @@ function finalizeIllustratorResizeFlow(ctx) {
         targetItem.trimmingAvailable === true,
         String(targetItem.trimmingReason || "")
     );
-    try {
-        if (dialogResult && dialogResult.hasOwnProperty('usePrev')) saveUsePrevOnly(dialogResult.usePrev);
-    } catch (_) { }
     if (dialogResult && dialogResult.showIllustratorTarget) {
         requestIllustratorForegroundAfterScript(dialogResult.showIllustratorTarget);
         return;
@@ -1232,11 +1259,7 @@ function finalizeIllustratorResizeFlow(ctx) {
             ));
         return;
     }
-    var reqWpx = calcRequiredPixels(placedWmm, targetPPI);
-    var reqHpx = calcRequiredPixels(placedHmm, targetPPI);
-    var scaleRatio = Math.max(reqWpx / docWidthPx, reqHpx / docHeightPx);
-    var newWidthPx = Math.round(docWidthPx * scaleRatio);
-    var newHeightPx = Math.round(docHeightPx * scaleRatio);
+    var resizePlan = calculateResizePlan(placedWmm, placedHmm, docWidthPx, docHeightPx, targetPPI);
     try {
         assertPhotoshopDocumentSession(ctx.photoshopSession);
     } catch (documentCheckError) {
@@ -1269,10 +1292,10 @@ function finalizeIllustratorResizeFlow(ctx) {
 
     __HISTORY_CTX__ = {
         photoshopSession: ctx.photoshopSession,
-        newWidthPx: newWidthPx,
-        newHeightPx: newHeightPx,
+        newWidthPx: resizePlan.widthPx,
+        newHeightPx: resizePlan.heightPx,
         targetPPI: targetPPI,
-        scaleRatio: scaleRatio,
+        scaleRatio: resizePlan.scaleRatio,
         upscaleMethod: upscaleMethod,
         downscaleMethod: downscaleMethod,
         trimmingMode: trimmingMode,
@@ -1733,13 +1756,8 @@ function main() {
         return;
     }
     var doc = app.activeDocument;
-    var isSaved = false;
-    try { isSaved = doc.saved === true; } catch (_savedStateError) {}
-    if (!isSaved) {
-        alert(localText(
-            "未保存の変更があるドキュメントでは実行できません。保存し、Illustratorのリンクを更新してから実行してください。",
-            "This script cannot run while the document has unsaved changes. Save it, update the link in Illustrator, and run the script again."
-        ));
+    if (!canProcessPhotoshopDocument(doc)) {
+        alert(getImageGeometryChangeMessage());
         return;
     }
 
@@ -2309,13 +2327,6 @@ function illustratorAdapter(request) {
                 "The placed-image UUID could not be obtained. Illustrator 2020 or later is required."
             ));
         }
-        var linkState = readLinkState(item, fileInfo.fileObject);
-        if (linkState !== "ok") {
-            throw new Error(linkState === "missing"
-                ? remoteText("リンク切れ画像です。", "The linked image is missing.")
-                : remoteText("リンクが更新されていません。", "The link is not updated."));
-        }
-
         var placedGeometry = readPlacedItemGeometry(item);
         var imageQuad = placedGeometry.quad;
         var imageGeometry = placedGeometry.local;
@@ -2969,7 +2980,6 @@ function illustratorAdapter(request) {
         }
         var fileInfo = splitFileName(pathInfo.fileName || decodedFileName);
         return {
-            fileObject: fileObject,
             normalizedPath: normalizedPath,
             folderPath: pathInfo.folderPath,
             fileName: fileInfo.fileName,
@@ -3055,19 +3065,6 @@ function illustratorAdapter(request) {
             "パスの座標を取得できません。",
             "A path coordinate could not be obtained."
         ));
-    }
-
-    function readLinkState(item, fileObject) {
-        try {
-            var statusText = String(item.status || "").toLowerCase();
-            if (statusText.indexOf("nodata") >= 0 || statusText.indexOf("missing") >= 0) return "missing";
-            if (statusText.indexOf("modified") >= 0 || statusText.indexOf("outdated") >= 0) return "modified";
-            var statusNumber = Number(item.status);
-            if (statusNumber === 1) return "missing";
-            if (statusNumber === 3) return "modified";
-        } catch (_statusError) { }
-        try { if (fileObject && fileObject.exists === false) return "missing"; } catch (_existsError) { }
-        return "ok";
     }
 
     function collectCompoundClippingPaths(compound) {
@@ -3263,7 +3260,6 @@ function selectInIllustrator(handle, bringApplicationToFront) {
     return true;
 }
 
-
 function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, docHeightPx, hasSmartObject, placedPPI, minPlacedPPI, maxPlacedPPI, matchedItemCount, selectionHandle, usesNameOnlyLinkInfo, trimmingAvailable, trimmingReason) {
     var WARN_STYLE_RED_BOLD = "redBold";
     var WARN_STYLE_DEFAULT_BOLD = "defaultBold";
@@ -3386,24 +3382,6 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
         for (var i = 0; i < labels.length; i++) {
             var button = panel.add("radiobutton", undefined, buildPaddedLabel(labels[i]));
             button.value = (i === initialIndex);
-            buttons.push(button);
-        }
-        return {
-            panel: panel,
-            buttons: buttons
-        };
-    }
-
-    function buildMethodPanel(dlg, title, labels, values, initialValue) {
-        var panel = dlg.add("panel", undefined, title);
-        panel.orientation = "row";
-        panel.alignChildren = ["left", "center"];
-        panel.spacing = 0;
-        panel.margins = [10, 12, 10, 12];
-        var buttons = [];
-        for (var i = 0; i < labels.length; i++) {
-            var button = panel.add("radiobutton", undefined, buildPaddedLabel(labels[i]));
-            button.value = (values[i] === initialValue);
             buttons.push(button);
         }
         return {
@@ -3554,69 +3532,68 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
         };
     }
 
+    function findValueIndex(values, value) {
+        for (var index = 0; index < values.length; index++) {
+            if (values[index] === value) return index;
+        }
+        return -1;
+    }
+
+    function getSelectedRadioIndex(buttons) {
+        for (var index = 0; index < buttons.length; index++) {
+            if (buttons[index].value) return index;
+        }
+        return -1;
+    }
+
+    function getSelectedRadioValue(group, defaultValue) {
+        var index = getSelectedRadioIndex(group.buttons);
+        return index >= 0 ? group.values[index] : defaultValue;
+    }
+
+    function selectRadioIndex(buttons, selectedIndex) {
+        for (var index = 0; index < buttons.length; index++) {
+            buttons[index].value = (index === selectedIndex);
+        }
+    }
+
     function collectSelectionState(ui) {
-        var selectedRadioIndex = 0;
-        var selectedUpscaleMethod = "deepUpscale";
-        var selectedDownscaleMethod = "bicubic";
-        var selectedTrimmingMode = TRIMMING_MODE_NONE;
-
-        for (var i = 0; i < ui.resolution.buttons.length; i++) {
-            if (ui.resolution.buttons[i].value) {
-                selectedRadioIndex = i;
-                break;
-            }
-        }
-        for (var j = 0; j < ui.upscale.buttons.length; j++) {
-            if (ui.upscale.buttons[j].value) {
-                selectedUpscaleMethod = ui.upscale.values[j];
-                break;
-            }
-        }
-        for (var k = 0; k < ui.downscale.buttons.length; k++) {
-            if (ui.downscale.buttons[k].value) {
-                selectedDownscaleMethod = ui.downscale.values[k];
-                break;
-            }
-        }
-        for (var trimmingIndex = 0; trimmingIndex < ui.trimming.buttons.length; trimmingIndex++) {
-            if (ui.trimming.buttons[trimmingIndex].value) {
-                selectedTrimmingMode = ui.trimming.values[trimmingIndex];
-                break;
-            }
-        }
-
+        var radioIndex = getSelectedRadioIndex(ui.resolution.buttons);
+        if (radioIndex < 0) radioIndex = 0;
         return {
-            radioIndex: selectedRadioIndex,
-            ppi: targetPPIList[selectedRadioIndex],
-            method: selectedUpscaleMethod,
-            downMethod: selectedDownscaleMethod,
-            trimmingMode: selectedTrimmingMode
+            radioIndex: radioIndex,
+            ppi: targetPPIList[radioIndex],
+            method: getSelectedRadioValue(ui.upscale, "deepUpscale"),
+            downMethod: getSelectedRadioValue(ui.downscale, "bicubic"),
+            trimmingMode: getSelectedRadioValue(ui.trimming, TRIMMING_MODE_NONE)
         };
     }
 
     function applySelectionState(ui, state, skipRedraw) {
         var validIndex = (state.radioIndex >= 0 && state.radioIndex < ui.resolution.buttons.length) ? state.radioIndex : 0;
-        for (var i = 0; i < ui.resolution.buttons.length; i++) ui.resolution.buttons[i].value = (i === validIndex);
-        for (var j = 0; j < ui.upscale.buttons.length; j++) ui.upscale.buttons[j].value = (ui.upscale.values[j] === state.upscaleMethod);
-        for (var k = 0; k < ui.downscale.buttons.length; k++) ui.downscale.buttons[k].value = (ui.downscale.values[k] === state.downMethod);
+        selectRadioIndex(ui.resolution.buttons, validIndex);
+        selectRadioIndex(ui.upscale.buttons, findValueIndex(ui.upscale.values, state.upscaleMethod));
+        selectRadioIndex(ui.downscale.buttons, findValueIndex(ui.downscale.values, state.downMethod));
         renderDialogState(skipRedraw === true);
     }
 
     function setControlsEnabled(ui, isEnabled) {
+        var groups = [ui.resolution, ui.upscale, ui.downscale];
         try {
-            ui.resolution.panel.enabled = isEnabled;
-            ui.upscale.panel.enabled = isEnabled;
-            ui.downscale.panel.enabled = isEnabled;
+            for (var groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+                groups[groupIndex].panel.enabled = isEnabled;
+            }
         } catch (e) { }
-        for (var i = 0; i < ui.resolution.buttons.length; i++) ui.resolution.buttons[i].enabled = isEnabled;
-        for (var j = 0; j < ui.upscale.buttons.length; j++) ui.upscale.buttons[j].enabled = isEnabled;
-        for (var k = 0; k < ui.downscale.buttons.length; k++) ui.downscale.buttons[k].enabled = isEnabled;
+        for (var index = 0; index < groups.length; index++) {
+            var buttons = groups[index].buttons;
+            for (var buttonIndex = 0; buttonIndex < buttons.length; buttonIndex++) {
+                buttons[buttonIndex].enabled = isEnabled;
+            }
+        }
     }
 
     function computeDialogState(selectionState, historyWarning) {
-        var requiredW = placedWmm * selectionState.ppi / 25.4;
-        var requiredH = placedHmm * selectionState.ppi / 25.4;
-        var scale = Math.max(requiredW / docWidthPx, requiredH / docHeightPx);
+        var scale = calculateResizePlan(placedWmm, placedHmm, docWidthPx, docHeightPx, selectionState.ppi).scaleRatio;
         var scalePct = scale * 100;
         var warningBag = createWarningBag();
         if (trimmingAvailable !== true) {
@@ -3707,8 +3684,8 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
     ui.info = buildInfoPanel(dlg, messageBase);
 
     ui.resolution = buildRadioPanel(dlg, localText("指定解像度", "Target Resolution"), resolutionLabels, initialState.radioIndex);
-    ui.upscale = buildMethodPanel(dlg, localText("拡大メソッド", "Upscale Method"), methodLabels, methodValues, initialState.upscaleMethod);
-    ui.downscale = buildMethodPanel(dlg, localText("縮小メソッド", "Downscale Method"), downMethodLabels, downMethodValues, initialState.downMethod);
+    ui.upscale = buildRadioPanel(dlg, localText("拡大メソッド", "Upscale Method"), methodLabels, findValueIndex(methodValues, initialState.upscaleMethod));
+    ui.downscale = buildRadioPanel(dlg, localText("縮小メソッド", "Downscale Method"), downMethodLabels, findValueIndex(downMethodValues, initialState.downMethod));
     ui.upscale.values = methodValues;
     ui.downscale.values = downMethodValues;
     ui.trimming = buildTrimmingPanel(dlg);
@@ -3743,43 +3720,30 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
     };
     setControlsEnabled(ui, !usePrevArea.checkbox.value);
 
-    function savePrefsAndClose(exitCode, saveAll) {
-        try {
-            if (saveAll) {
-                var selected = collectSelectionState(ui);
-                savePrefs({
-                    usePrev: usePrevArea.checkbox.value === true,
-                    radioIndex: selected.radioIndex,
-                    upscaleMethod: selected.method,
-                    downMethod: selected.downMethod
-                });
-            } else {
-                saveUsePrevOnly(usePrevArea.checkbox.value);
-            }
-        } catch (e) { }
+    function closeDialog(exitCode) {
         try {
             dlg.close(exitCode);
-        } catch (e2) {
+        } catch (e) {
             dlg.close();
         }
     }
 
     buttonRow.okButton.onClick = function () {
-        savePrefsAndClose(1, true);
+        closeDialog(1);
     };
     buttonRow.cancelButton.onClick = function () {
-        savePrefsAndClose(0, false);
+        closeDialog(0);
     };
     var showIllustratorTarget = "";
     buttonRow.appButton.onClick = function () {
         if (selectionHandle && selectInIllustrator(selectionHandle, false)) {
             showIllustratorTarget = String(selectionHandle.bridgeTarget || "");
-            savePrefsAndClose(2, false);
+            closeDialog(2);
         }
     };
     buttonRow.helpButton.onClick = function () {
         openURLInBrowser("https://gist.github.com/Yamonov/b63d9c67402ef7af4c17ab33caccce31");
-        savePrefsAndClose(0, false);
+        closeDialog(0);
     };
 
     dlg.addEventListener("keydown", function (k) {
@@ -3800,27 +3764,40 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
     usePrevArea.updateInfoLine();
 
     var dialogResult = dlg.show();
-    var ok = (dialogResult === 1);
-    if (ok) {
-        var selectedState = collectSelectionState(ui);
+    var selectedState = dialogResult === 1 ? collectSelectionState(ui) : null;
+    var usePrev = !!usePrevArea.checkbox.value;
+    // ボタン、Esc、ウィンドウを閉じる操作のいずれでも、設定はここで一度だけ保存する。
+    try {
+        if (selectedState) {
+            savePrefs({
+                usePrev: usePrev,
+                radioIndex: selectedState.radioIndex,
+                upscaleMethod: selectedState.method,
+                downMethod: selectedState.downMethod
+            });
+        } else {
+            saveUsePrevOnly(usePrev);
+        }
+    } catch (e) { }
+    if (selectedState) {
         return {
             ppi: selectedState.ppi,
             method: selectedState.method,
             downMethod: selectedState.downMethod,
             trimmingMode: selectedState.trimmingMode,
-            usePrev: !!usePrevArea.checkbox.value,
+            usePrev: usePrev,
             cancelled: false
         };
     }
     if (dialogResult === 2 && showIllustratorTarget) {
         return {
-            usePrev: !!usePrevArea.checkbox.value,
+            usePrev: usePrev,
             cancelled: true,
             showIllustratorTarget: showIllustratorTarget
         };
     }
     return {
-        usePrev: !!usePrevArea.checkbox.value,
+        usePrev: usePrev,
         cancelled: true
     };
 }
@@ -4311,7 +4288,6 @@ return {
     writeMetadata: writeMetadata
 };
 }
-
 
 // 実行開始
 main();
