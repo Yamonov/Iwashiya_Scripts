@@ -1,7 +1,7 @@
 SCRIPTMETA-DIST-BEGIN
 
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
-Version=2.3
+Version=2.4
 
 Script-ID=org.iwashi.CurledLine
 Version=1.0.0
@@ -52,6 +52,7 @@ Ver 1.2:テンキーで変形基準点、変形関連設定、表示関連設定
 Ver 1:テンキー入力で変形基準点とIllustratorの各種設定を即時変更するUIを追加。
 
 ## org.iwashi.CMYKto100GCRConverter_ai
+Ver 2.4:変換したCMYKグローバルスウォッチ名を変換後のCMYK値に更新。独自名は括弧内に保持し、再実行時の名前の重複を防止。同名衝突や名前の更新失敗時は改名を見送り、未更新件数を表示。
 Ver 2.3:精度を向上
 Ver 2.2.1:未適用内訳でパターンカラーを「パターン等」として分けて表示。
 Ver 2.2:完了ダイアログを自前実装し、未適用オブジェクトの選択と種類別内訳表示を追加。グレースケールは未適用対象から除外。

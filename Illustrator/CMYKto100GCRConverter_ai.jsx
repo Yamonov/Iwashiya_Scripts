@@ -3,11 +3,11 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
-Version=2.3
+Version=2.4
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=色を変えずにCMYK値を調整
 Author=Murakami Yoshiteru
-Release-Date=2026-07-28
+Release-Date=2026-10-12
 Target-App=Illustrator
 Edit-Password-SHA256=oS5aCLoTCKedGLZN:3d8282cb048f8c02d5bf1dca0493471b70fda75c2a3131e4cb0c10b4c1688127
 Description-BEGIN
@@ -15,6 +15,7 @@ Description-BEGIN
 ・彩度調整オプションで、仕上がりの彩度を上げられます。
 ・K量の調整オプションで、Kを減らす方向または増やす方向へ段階的に寄せられます。増やすとより多くのグレートーンがKのみに、減らすとCMYからKを抜いてK濁りを抑えます。
 ・グローバルスウォッチ、グラデーションにも対応しています。
+・変換したCMYKグローバルスウォッチの名前をCMYK値に更新し、独自の名前は括弧内に保持します。
 
 ■注意！
 ・アピアランスで塗ったテキストはアピアランス分割してください。
@@ -106,6 +107,11 @@ var UI_TEXT = {
     selectedObjects: { ja: "選択オブジェクト数", en: "Selected objects" },
     selectedObjectsUnit: { ja: "件", en: "objects" },
     updatedColors: { ja: "変更色数", en: "Updated colors" },
+    swatchRenameSkipped: { ja: "スウォッチ名の未更新", en: "Swatch names not updated" },
+    swatchRenameSkippedHelp: {
+        ja: "名前の重複や取得・更新の失敗があったため、改名を見送りました。色の変換結果は保持されています。",
+        en: "Some names could not be updated because of name conflicts or read/write failures. Color conversions have been retained."
+    },
     processingTime: { ja: "処理時間", en: "Processing time" },
     cacheHitRate: { ja: "キャッシュヒット率", en: "Cache hit rate" },
     skippedCount: { ja: "未適用件数", en: "Skipped items" },
@@ -1044,6 +1050,9 @@ var processedSpotMap = {};
 var processedGradientMap = {};
 var spotReferenceKeys = [];
 var gradientReferenceKeys = [];
+var pendingSpotRenames = [];
+var spotRenameSkippedCount = 0;
+var CMYK_SWATCH_NAME_PATTERN = /^[ \t]*C[ \t]*=[ \t]*(\d+(?:\.\d+)?)[ \t]+M[ \t]*=[ \t]*(\d+(?:\.\d+)?)[ \t]+Y[ \t]*=[ \t]*(\d+(?:\.\d+)?)[ \t]+K[ \t]*=[ \t]*(\d+(?:\.\d+)?)(?:[ \t]+\(([\s\S]*)\))?[ \t]*$/;
 
 function hostCollectionObjectKey(obj, prefix, references) {
     if (!obj) return null;
@@ -1078,6 +1087,102 @@ function gradientKey(gradient) {
 
 function markProcessedSpot(key, state) {
     if (key) processedSpotMap[key] = state;
+}
+
+function buildGlobalCMYKSwatchName(originalName, cmyk) {
+    var name = 'C=' + cmyk.c + ' M=' + cmyk.m + ' Y=' + cmyk.y + ' K=' + cmyk.k;
+    var match = CMYK_SWATCH_NAME_PATTERN.exec(originalName);
+    if (match) {
+        for (var i = 1; i <= 4; i++) {
+            if (Number(match[i]) > 100) {
+                match = null;
+                break;
+            }
+        }
+    }
+    // 既に付けたCMYK表記だけを更新し、独自名に含まれる括弧や空白も保持する。
+    if (match) return typeof match[5] === 'string' ? name + ' (' + match[5] + ')' : name;
+    return name + ' (' + originalName + ')';
+}
+
+function queueSpotRename(spot, originalName, cmyk) {
+    if (typeof originalName !== 'string') {
+        spotRenameSkippedCount++;
+        return;
+    }
+    var newName = buildGlobalCMYKSwatchName(originalName, cmyk);
+    if (newName === originalName) return;
+    pendingSpotRenames.push({ spot: spot, originalName: originalName, newName: newName });
+}
+
+function readSwatchNameCounts(doc) {
+    var counts = {};
+    var swatches = doc.swatches;
+    for (var i = 0, n = swatches.length; i < n; i++) {
+        var name = swatches[i].name;
+        if (typeof name !== 'string') throw new Error('Cannot read swatch name');
+        var key = 'swatch:' + name;
+        counts[key] = (counts[key] || 0) + 1;
+    }
+    return counts;
+}
+
+function restoreSpotName(task) {
+    try {
+        if (task.spot.name !== task.originalName) task.spot.name = task.originalName;
+        return task.spot.name === task.originalName;
+    } catch (e) {
+        return false;
+    }
+}
+
+function applyPendingSpotRenames(doc) {
+    var tasks = pendingSpotRenames;
+    pendingSpotRenames = [];
+    if (tasks.length === 0) return;
+
+    // 衝突確認はスウォッチ一覧を一度だけ読む。取得できなければ改名しない。
+    var nameCounts;
+    try {
+        nameCounts = readSwatchNameCounts(doc);
+    } catch (e) {
+        spotRenameSkippedCount += tasks.length;
+        return;
+    }
+
+    for (var i = 0, n = tasks.length; i < n; i++) {
+        var task = tasks[i];
+        var newKey = 'swatch:' + task.newName;
+        if (nameCounts[newKey] > 0) {
+            spotRenameSkippedCount++;
+            continue;
+        }
+        try {
+            if (task.spot.name !== task.originalName) {
+                spotRenameSkippedCount++;
+                continue;
+            }
+        } catch (e2) {
+            spotRenameSkippedCount++;
+            continue;
+        }
+        try {
+            task.spot.name = task.newName;
+            // 切り詰め等で独自名が失われた場合も、元の名前へ戻す。
+            if (task.spot.name !== task.newName) throw new Error('Swatch name was not retained');
+        } catch (e3) {
+            if (!restoreSpotName(task)) {
+                // 名前一覧との整合性を確認できないため、残りの改名も見送る。
+                spotRenameSkippedCount += n - i;
+                return;
+            }
+            spotRenameSkippedCount++;
+            continue;
+        }
+        var oldKey = 'swatch:' + task.originalName;
+        nameCounts[oldKey] = Math.max(0, (nameCounts[oldKey] || 0) - 1);
+        nameCounts[newKey] = 1;
+    }
 }
 
 function trimLabCacheAfterSearch() {
@@ -2166,6 +2271,10 @@ function processSpotColorObject(sp, key, orig) {
         return spotResult;
     }
 
+    var originalName = null;
+    try {
+        originalName = sp.name;
+    } catch (nameReadError) { }
     var convertedColor = makeCMYK(spotResult.out.c, spotResult.out.m, spotResult.out.y, spotResult.out.k);
     try {
         sp.color = convertedColor;
@@ -2180,6 +2289,7 @@ function processSpotColorObject(sp, key, orig) {
     markProcessedSpot(key, {
         reason: null
     });
+    queueSpotRename(sp, originalName, spotResult.out);
     return makeColorProcessResult(true, null, spotResult.out, true);
 }
 
@@ -2891,6 +3001,11 @@ function showCompletionDialog(info) {
     addCompletionMetricRow(metricsGroup, 'selectedObjects', info.selectedObjectCount, 'updatedColors', info.updatedColors, metricWidths);
     addCompletionMetricRow(metricsGroup, 'cacheHitRate', info.cacheHitRate, 'processingTime', info.processingTime, metricWidths);
 
+    if (info.swatchRenameSkippedCount > 0) {
+        var renameSkipped = metricsGroup.add('statictext', undefined, formatMetricText('swatchRenameSkipped', info.swatchRenameSkippedCount));
+        renameSkipped.helpTip = uiText('swatchRenameSkippedHelp');
+    }
+
     if (info.skippedCount > 0) {
         var skippedTitle = formatMetricText('skippedCount', formatNumberWithUnit(info.skippedCount, 'skippedCountUnit'));
         var breakdownLines = skippedBreakdownLines(info.skippedDetails);
@@ -2941,6 +3056,8 @@ function cleanupAfterRun() {
         processedGradientMap = {};
         spotReferenceKeys = [];
         gradientReferenceKeys = [];
+        pendingSpotRenames = [];
+        spotRenameSkippedCount = 0;
         cacheHitCount = 0;
         resultCacheLookupCount = 0;
         gSkipBreakdown = [];
@@ -2996,9 +3113,14 @@ function cleanupAfterRun() {
         var cancelled = false;
         var finalSkippedItems = [];
         try {
-            appliedInfo = applyToSelection(stats.items);
+            try {
+                appliedInfo = applyToSelection(stats.items);
+            } finally {
+                // 名前を識別に使う変換ループの後で改名する。中断時も変換済みの分を反映する。
+                applyPendingSpotRenames(doc);
+            }
             finalSkippedItems = collectFinalSkippedItems(stats);
-            totalSec = (nowMs() - t0) / 1000.0; // 変換処理のみの時間
+            totalSec = (nowMs() - t0) / 1000.0; // 色変換とスウォッチ名更新の時間
             var skippedDetails = [];
             addSkipBreakdownEntries(skippedDetails, stats.unsupportedBreakdown);
             addSkipBreakdownEntries(skippedDetails, gSkipBreakdown);
@@ -3006,6 +3128,7 @@ function cleanupAfterRun() {
             completionInfo = {
                 selectedObjectCount: formatNumberWithUnit(completionSelectedObjectCount, 'selectedObjectsUnit'),
                 updatedColors: appliedInfo.count,
+                swatchRenameSkippedCount: spotRenameSkippedCount,
                 cacheHitRate: formatPercent(cacheHitCount, resultCacheLookupCount),
                 processingTime: formatCompletionSeconds(totalSec),
                 skippedCount: finalSkippedItems.length,
