@@ -33,6 +33,7 @@ function setup(enabled = true) {
 }
 
 function makeColor(ctx, cmyk) { return ctx.makeCMYK(cmyk.c, cmyk.m, cmyk.y, cmyk.k); }
+function grayColor(gray) { return { typename: 'GrayColor', gray }; }
 function globalColor(ctx, item, tint = 100) { const color = new ctx.SpotColor(); color.spot = item; color.tint = tint; return color; }
 function addGlobal(ctx, doc, name, cmyk, model = 'process') {
     const item = spot(name, { colorType: model, index: doc.data.swatches.length });
@@ -90,6 +91,177 @@ test('postprocessing unifies newly converted and pre-existing K100 into one proc
     assert.deepEqual(values(before.fillColor.spot.color), [0, 0, 1.01, 100]);
     assert.equal(before.fillColor.tint, 100);
 });
+
+test('100 percent gray fills and strokes share the K100 swatch without color search', () => {
+    const { ctx, doc, layer } = setup();
+    const black = path(ctx, layer);
+    convert(ctx, entryFor(ctx, black));
+    const gray = path(ctx, layer);
+    gray.fillColor = grayColor(100);
+    gray.stroked = true; gray.strokeColor = grayColor(100);
+    gray.fillOverprint = true; gray.strokeOverprint = true;
+    const unselected = path(ctx, layer); unselected.fillColor = grayColor(100);
+    ctx.buildAdjustedColorResult = () => assert.fail('grayscale must not enter CMYK color search');
+    assert.equal(convert(ctx, entryFor(ctx, gray)), 0);
+    assert.equal(gray.fillColor.typename, 'GrayColor', 'assignment belongs to final postprocessing');
+    assert.equal(ctx.applyAutoBlackOverprint(doc), 3);
+    assert.equal(gray.fillColor.spot, black.fillColor.spot);
+    assert.equal(gray.strokeColor.spot, black.fillColor.spot);
+    assert.deepEqual(values(gray.fillColor.spot.color), [0, 0, 1.01, 100]);
+    assert.equal(gray.fillColor.tint, 100);
+    assert.equal(gray.fillOverprint, false);
+    assert.equal(gray.strokeOverprint, false);
+    assert.equal(unselected.fillColor.typename, 'GrayColor');
+    assert.equal(doc.data.collectionReads, 1);
+    assert.equal(doc.data.additions, 1);
+});
+
+test('off never reads grayscale density, opacity or overprint and never queues gray paints', () => {
+    const { ctx, doc, layer } = setup(false);
+    const item = path(ctx, layer);
+    item.fillColor = { typename: 'GrayColor', get gray() { assert.fail('density read while off'); } };
+    for (const prop of ['opacity', 'fillOverprint']) Object.defineProperty(item, prop, { get() { assert.fail(prop + ' read while off'); } });
+    ctx.buildAdjustedColorResult = () => assert.fail('grayscale entered CMYK search');
+    ctx.queueAutoBlackOverprintTask = () => assert.fail('gray queued while off');
+    const entry = entryFor(ctx, item);
+    assert.equal(convert(ctx, entry), 0);
+    assert.equal(ctx.applyAutoBlackOverprint(doc), 0);
+    assert.equal(entry.skipped, false);
+    assert.equal(doc.data.collectionReads, 0);
+});
+
+for (const gray of [0, 50, 99, 99.999999]) {
+    test('gray ' + gray + ' is not rounded up to full black', () => {
+        const { ctx, doc, layer } = setup();
+        const item = path(ctx, layer); item.fillColor = grayColor(gray);
+        const original = item.fillColor;
+        for (const prop of ['opacity', 'fillOverprint']) Object.defineProperty(item, prop, { get() { assert.fail('excluded gray: ' + prop); } });
+        const entry = entryFor(ctx, item);
+        convert(ctx, entry);
+        assert.equal(ctx.applyAutoBlackOverprint(doc), 0);
+        assert.equal(item.fillColor, original);
+        assert.equal(entry.skipped, false);
+        assert.equal(ctx.conversions, 0);
+        assert.equal(doc.data.collectionReads, 0);
+    });
+}
+
+for (const translucent of ['object', 'parent']) {
+    test('100 percent gray respects ' + translucent + ' opacity', () => {
+        const { ctx, doc, layer } = setup();
+        const parent = translucent === 'parent' ? { typename: 'GroupItem', opacity: 50, parent: layer } : layer;
+        const item = path(ctx, parent, k100, translucent === 'object' ? 50 : 100);
+        item.fillColor = grayColor(100);
+        Object.defineProperty(item, 'fillOverprint', { get() { assert.fail('overprint inspected on translucent gray'); } });
+        const entry = entryFor(ctx, item);
+        convert(ctx, entry);
+        assert.equal(ctx.applyAutoBlackOverprint(doc), 0);
+        assert.equal(item.fillColor.typename, 'GrayColor');
+        assert.equal(entry.skipped, false);
+        assert.equal(doc.data.collectionReads, 0);
+    });
+}
+
+test('100 percent gray text fills and strokes use text overprint attributes', () => {
+    const { ctx, doc, layer } = setup();
+    const frame = { typename: 'TextFrame', opacity: 100, parent: layer };
+    const attrs = { fillColor: grayColor(100), strokeColor: grayColor(100), overprintFill: true, overprintStroke: true };
+    ctx.makeTextSubRange = () => ({ characterAttributes: attrs });
+    const entry = { target: frame, typeName: 'TextFrame', owner: frame, skipped: false };
+    ctx.applySelectionTask(entry, { kind: 'textRun', start: 0, end: 1, steps: 2 });
+    assert.equal(ctx.applyAutoBlackOverprint(doc), 2);
+    assert.equal(attrs.fillColor.spot, attrs.strokeColor.spot);
+    assert.equal(attrs.overprintFill, false);
+    assert.equal(attrs.overprintStroke, false);
+    assert.equal(ctx.conversions, 0);
+});
+
+test('a shared gray process swatch detaches only selected full-tint paints', () => {
+    const { ctx, doc, layer } = setup();
+    const original = addGlobal(ctx, doc, '共有グレー', k100);
+    original.state.color = grayColor(100);
+    const full = path(ctx, layer); full.fillColor = globalColor(ctx, original);
+    const tint = path(ctx, layer); tint.fillColor = globalColor(ctx, original, 50);
+    const unselected = path(ctx, layer); unselected.fillColor = globalColor(ctx, original);
+    for (const item of [full, tint]) convert(ctx, entryFor(ctx, item));
+    assert.equal(ctx.applyAutoBlackOverprint(doc), 1);
+    assert.notEqual(full.fillColor.spot, original);
+    assert.equal(full.fillColor.spot.name, jaName);
+    assert.equal(tint.fillColor.spot, original);
+    assert.equal(unselected.fillColor.spot, original);
+    assert.equal(original.color.typename, 'GrayColor');
+    assert.equal(original.color.gray, 100);
+    assert.equal(original.state.colorWrites, 0);
+    assert.equal(original.state.nameWrites, 0);
+    assert.equal(ctx.pendingSpotRenames.length, 0);
+    assert.equal(ctx.conversions, 0);
+});
+
+for (const model of ['spot', 'registration']) {
+    test('gray-based ' + model + ' colors are excluded before reading density', () => {
+        const { ctx, doc, layer } = setup();
+        const original = addGlobal(ctx, doc, 'original', k100, model);
+        original.state.color = { typename: 'GrayColor', get gray() { assert.fail('excluded color density read'); } };
+        const item = path(ctx, layer); item.fillColor = globalColor(ctx, original);
+        item.fillOverprint = true;
+        const entry = entryFor(ctx, item);
+        convert(ctx, entry);
+        assert.equal(ctx.applyAutoBlackOverprint(doc), 0);
+        assert.equal(item.fillColor.spot, original);
+        assert.equal(item.fillOverprint, true);
+        assert.equal(entry.skipped, false);
+        assert.equal(doc.data.collectionReads, 0);
+    });
+}
+
+test('gray gradient stops remain excluded from K100 postprocessing', () => {
+    const { ctx, doc, layer } = setup();
+    const gradient = { name: 'gray gradient', gradientStops: [{ color: grayColor(100) }, { color: grayColor(50) }] };
+    const item = path(ctx, layer); item.fillColor = { typename: 'GradientColor', gradient };
+    convert(ctx, entryFor(ctx, item));
+    assert.equal(ctx.autoBlackOverprintState.tasks.length, 0);
+    assert.equal(ctx.applyAutoBlackOverprint(doc), 0);
+    assert.deepEqual(gradient.gradientStops.map(stop => stop.color.gray), [100, 50]);
+    assert.equal(ctx.conversions, 0);
+});
+
+test('a grayscale density read failure is reported without applying a swatch', () => {
+    const { ctx, doc, layer } = setup();
+    const item = path(ctx, layer);
+    item.fillColor = { typename: 'GrayColor', get gray() { throw new Error('density unavailable'); } };
+    const entry = entryFor(ctx, item);
+    convert(ctx, entry);
+    assert.equal(ctx.applyAutoBlackOverprint(doc), 0);
+    assert.equal(entry.skipped, true);
+    assert.equal(ctx.gSkipBreakdown[0].key, 'process:colorReadFailed');
+    assert.equal(doc.data.collectionReads, 0);
+});
+
+test('a same-name gray swatch is not mistaken for the dedicated Y1 color', () => {
+    const { ctx, doc, layer } = setup();
+    const existing = addGlobal(ctx, doc, jaName, k100);
+    existing.state.color = grayColor(100);
+    const item = path(ctx, layer); item.fillColor = grayColor(100);
+    const entry = entryFor(ctx, item);
+    convert(ctx, entry);
+    assert.equal(ctx.applyAutoBlackOverprint(doc), 0);
+    assert.equal(existing.state.colorWrites, 0);
+    assert.equal(item.fillColor.typename, 'GrayColor');
+    assert.equal(ctx.gSkipBreakdown[0].key, 'process:autoBlackOverprintNameConflict');
+});
+
+for (const locale of ['ja', 'en']) {
+    test('a grayscale-only run counts registration and shows the existing notice: ' + locale, () => {
+        const { ctx, doc, layer } = setup(); ctx.$.locale = locale;
+        const item = path(ctx, layer); item.fillColor = grayColor(100);
+        const run = configureAutoMain(ctx, doc, [item], true);
+        main.runInContext(ctx);
+        assert.equal(run.result.updatedColors, 1);
+        assert.equal(run.result.showAutoBlackOverprintNotice, true);
+        assert.equal(run.result.skippedCount, 0);
+        assert.equal(item.fillColor.spot.name, locale === 'ja' ? jaName : enName);
+    });
+}
 
 test('final color determines eligibility even for originally pure K100', () => {
     const { ctx, doc, layer } = setup();
@@ -409,6 +581,20 @@ test('dedicated color can change when final option result is not K100', () => {
     const item = path(ctx, layer); item.fillColor = globalColor(ctx, existing);
     convert(ctx, entryFor(ctx, item)); ctx.applyAutoBlackOverprint(doc);
     assert.deepEqual(values(existing.color), [20, 15, 0, 80]);
+    assert.equal(doc.data.additions, 0);
+});
+
+test('light-color protection cannot round dedicated Y1.01 down to Y1 on a repeat run', () => {
+    const { ctx, doc, layer } = setup();
+    ctx.LIGHT_COLOR_PROTECT_ENABLED = true;
+    ctx.buildAdjustedColorResult = () => ({ changed: true, out: { c: 0, m: 0, y: 1, k: 100 } });
+    const existing = addGlobal(ctx, doc, jaName, { c: 0, m: 0, y: 1.01, k: 100 });
+    const item = path(ctx, layer); item.fillColor = globalColor(ctx, existing);
+    convert(ctx, entryFor(ctx, item));
+    assert.equal(ctx.applyAutoBlackOverprint(doc), 0);
+    assert.equal(existing.color.yellow, 1.01);
+    assert.equal(existing.state.colorWrites, 0);
+    assert.equal(ctx.pendingSpotRenames.length, 0);
     assert.equal(doc.data.additions, 0);
 });
 

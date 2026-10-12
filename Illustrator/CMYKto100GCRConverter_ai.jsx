@@ -16,7 +16,7 @@ Description-BEGIN
 ・K量の調整オプションで、Kを減らす方向または増やす方向へ段階的に寄せられます。増やすとより多くのグレートーンがKのみに、減らすとCMYからKを抜いてK濁りを抑えます。
 ・グローバルスウォッチ、グラデーションにも対応しています。
 ・変換したCMYKグローバルスウォッチの名前をCMYK値に更新し、独自の名前は括弧内に保持します。
-・「K100の自動墨ノセを回避」をオンにすると、選択範囲内で最終結果がK100かつ不透明度100%の単色を、K100/Y1の共通グローバルスウォッチ（Y設定値1.01%）に置き換え、対象のオーバープリント属性も解除します。
+・「K100の自動墨ノセを回避」をオンにすると、選択範囲内で不透明度100%の単色のうち、最終結果がK100のものとグレー濃度100%のものを、K100/Y1の共通グローバルスウォッチ（Y設定値1.01%）に置き換え、対象のオーバープリント属性も解除します。
 
 ■注意！
 ・アピアランスで塗ったテキストはアピアランス分割してください。
@@ -94,13 +94,13 @@ var UI_TEXT = {
     },
     protectLightColors: { ja: "薄い色を保護", en: "Protect light colors" },
     protectLightColorsHelp: {
-        ja: "K+側で有効です。明るく色味のある薄い色で、CMYが減ってもKが十分増えない場合は、CMYを消す変換を採用しません。",
-        en: "Available on the K+ side. For light colors with visible chroma, rejects conversions that remove CMY without adding enough K."
+        ja: "K+側で有効です。CMYK値は四捨五入して整数化しますが、1〜3%の成分は0%にせず残します。明るく色味のある薄い色で、CMYが減ってもKが十分増えない場合は、CMYを消す変換を採用しません。",
+        en: "Available on the K+ side. Rounds CMYK values to integers but retains 1–3% components instead of setting them to zero. For light colors with visible chroma, rejects conversions that remove CMY without adding enough K."
     },
     avoidAutoBlackOverprint: { ja: "K100の自動墨ノセを回避", en: "Avoid automatic overprint for K100" },
     avoidAutoBlackOverprintHelp: {
-        ja: "全オプション適用後、選択範囲内のC0/M0/Y0/K100の塗り・線・文字色をC0/M0/Y1/K100の共通グローバルスウォッチに置き換え、対象のオーバープリント属性を解除します。Yの設定値は1.01%とし、保存後も1%以上であることを確認します。元からK100のものも含みます。既に専用スウォッチを使う対象もオーバープリント属性を確認します。オブジェクトと親グループ・レイヤーの不透明度が全て100%の場合に適用します。グラデーションは対象外です。不透明マスクとアピアランス内の個別の不透明度は確認できません。",
-        en: "After all conversion options, replaces solid C0/M0/Y0/K100 fills, strokes, and text colors in the selection with one C0/M0/Y1/K100 global swatch and disables their overprint attributes, including existing K100 colors. Yellow is set to 1.01% and verified to remain at or above 1% after storage. Also checks overprint on eligible paints already using the dedicated swatch. The object and all parent groups and layers must have 100% opacity. Gradients are excluded. Opacity masks and individual appearance opacity cannot be checked."
+        ja: "全オプション適用後、選択範囲内のC0/M0/Y0/K100の塗り・線・文字色をC0/M0/Y1/K100の共通グローバルスウォッチに置き換え、対象のオーバープリント属性を解除します。Yの設定値は1.01%とし、保存後も1%以上であることを確認します。元からK100のものと、グレー濃度100%の単色も含みます。既に専用スウォッチを使う対象もオーバープリント属性を確認します。オブジェクトと親グループ・レイヤーの不透明度が全て100%の場合に適用します。グラデーションは対象外です。不透明マスクとアピアランス内の個別の不透明度は確認できません。",
+        en: "After all conversion options, replaces solid C0/M0/Y0/K100 fills, strokes, and text colors in the selection with one C0/M0/Y1/K100 global swatch and disables their overprint attributes, including existing K100 colors and 100% grayscale black. Yellow is set to 1.01% and verified to remain at or above 1% after storage. Also checks overprint on eligible paints already using the dedicated swatch. The object and all parent groups and layers must have 100% opacity. Gradients are excluded. Opacity masks and individual appearance opacity cannot be checked."
     },
     autoBlackOverprintSwatchName: { ja: "自動墨ノセ回避K100", en: "K100 Auto Overprint Avoidance" },
     autoBlackOverprintNotice: {
@@ -1260,15 +1260,20 @@ function readCMYKValues(color) {
 
 function readSolidProcessCMYK(color) {
     if (!color) return null;
-    if (color.typename === 'SpotColor') {
+    var typeName = color.typename;
+    if (typeName === 'SpotColor') {
         // 濃度が100%未満なら、定義がK100でも使用箇所の色はK100ではない。
         if (color.tint !== 100) return null;
         var spot = color.spot;
         if (!spot || spot.colorType !== ColorModel.PROCESS) return null;
         color = spot.color;
+        if (!color) return null;
+        typeName = color.typename;
     }
-    if (!color || color.typename !== 'CMYKColor') return null;
-    return readCMYKValues(color);
+    if (typeName === 'CMYKColor') return readCMYKValues(color);
+    // 墨ノセ回避の最終判定だけで、グレー濃度100%をK100として扱う。
+    if (typeName === 'GrayColor' && color.gray === 100) return { c: 0, m: 0, y: 0, k: 100 };
+    return null;
 }
 
 function readFullyOpaqueState(item) {
@@ -1571,7 +1576,8 @@ function makeCMYK(c, m, y, k) {
 // CMYK値を整数に丸め
 function roundCMYKValue(v, applyZeroThreshold) {
     var r = Math.round(v);
-    if (applyZeroThreshold && r <= ZERO_THR) return 0;
+    // 薄い色の保護が有効なら、探索中の評価から最終出力まで1〜3%も残す。
+    if (applyZeroThreshold && !LIGHT_COLOR_PROTECT_ENABLED && r <= ZERO_THR) return 0;
     return clampPct(r);
 }
 
@@ -2516,8 +2522,8 @@ function processedSpotStateResult(state) {
 function processSpotColorObject(sp, key, orig) {
     var spotResult = buildAdjustedColorResult(orig);
     if (AVOID_AUTO_BLACK_OVERPRINT_ENABLED && spotResult.changed &&
-        isK100CMYK(spotResult.out) && isAutoBlackOverprintCMYK(orig)) {
-        // 全変換オプションの結果を確認してから、専用色のY1が丸めで消えるのを防ぐ。
+        (isK100CMYK(spotResult.out) || isAutoBlackOverprintCMYK(spotResult.out)) && isAutoBlackOverprintCMYK(orig)) {
+        // 全変換オプションの結果を確認してから、専用色のY値が整数化や閾値処理で変わるのを防ぐ。
         try {
             if (isAutoBlackOverprintDefinition(sp.name, orig)) {
                 markProcessedSpot(key, { reason: null });
@@ -2668,7 +2674,7 @@ function processColorPropertyCore(target, propName, allowGradient, entry) {
     var res = processColorObject(col, typeName);
     var changed = applyColorResultToProperty(target, propName, res, entry, null);
     if (AVOID_AUTO_BLACK_OVERPRINT_ENABLED &&
-        (typeName === 'CMYKColor' || typeName === 'SpotColor') &&
+        (typeName === 'CMYKColor' || typeName === 'SpotColor' || typeName === 'GrayColor') &&
         (changed > 0 || (res && !res.changed && isIgnoredColorProcessReason(res.reason)))) {
         // 単色の使用箇所だけを保持する。共有グラデーションの停止点は変更しない。
         queueAutoBlackOverprintTask(target, propName, entry, changed > 0);
