@@ -3,7 +3,7 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=keypadSettingsChager_Ai
-Version=1.4
+Version=1.5
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=各種設定をテンキーで変更
 Author=Murakami Yoshiteru
@@ -71,23 +71,18 @@ SCRIPTMETA-END
         "equals": "=",
         "numpadequal": "=",
         "comma": ",",
-        "period": ".",
-        "decimal": ".",
-        "numpaddecimal": ".",
         "u+002f": "/",
         "u+002a": "*",
         "u+002d": "-",
         "u+002b": "+",
         "u+003d": "=",
-        "u+002c": ",",
-        "u+002e": "."
+        "u+002c": ","
     };
     var KEY_CODE_TO_SHORTCUT = {
         42: "*",
         43: "+",
         44: ",",
         45: "-",
-        46: ".",
         47: "/",
         61: "=",
         67: "*",
@@ -99,22 +94,17 @@ SCRIPTMETA-END
         106: "*",
         107: "+",
         109: "-",
-        110: ".",
         111: "/",
         187: "+",
         188: ",",
         189: "-",
-        190: ".",
         191: "/"
     };
 
     var originalPoint = readPoint();
     var selectedPoint = originalPoint;
     var cornerOnValue = readCornerOnValue();
-    var originalUnitState = getCurrentUnitState();
     var optionByShortcut = {};
-    var unitPresetItems = [];
-    var selectedUnitPresetIndex = 0;
     var lastHandledKey = "";
     var lastHandledAt = 0;
     var lastClickedItem = null;
@@ -153,7 +143,6 @@ SCRIPTMETA-END
     options.spacing = 12;
 
     addOptionColumn(options, getOptionDefinitions());
-    addUnitPresetColumn(options);
 
     var keySink = win.add("edittext", undefined, "");
     keySink.preferredSize = [0, 0];
@@ -198,12 +187,6 @@ SCRIPTMETA-END
             preventDefault(ev);
             return;
         }
-
-        if (key === ".") {
-            cycleUnitPreset();
-            rememberHandledKey(key);
-            preventDefault(ev);
-        }
     }
 
     try {
@@ -241,11 +224,6 @@ SCRIPTMETA-END
                 setOptionValue(option, !option.value);
                 rememberHandledKey(key);
                 continue;
-            }
-
-            if (key === ".") {
-                cycleUnitPreset();
-                rememberHandledKey(key);
             }
         }
 
@@ -439,49 +417,6 @@ SCRIPTMETA-END
         return column;
     }
 
-    function addUnitPresetColumn(parent) {
-        var column = parent.add("group");
-        column.orientation = "column";
-        column.alignChildren = ["left", "center"];
-        column.margins = 0;
-        column.spacing = 2;
-
-        var title = column.add("statictext", undefined, "単位 [.]");
-        title.justify = "left";
-
-        var presets = getUnitPresets();
-
-        for (var i = 0; i < presets.length; i++) {
-            var item = presets[i];
-            var row = column.add("group");
-            row.orientation = "row";
-            row.alignChildren = ["left", "center"];
-            row.margins = 0;
-            row.spacing = 3;
-
-            var mark = row.add("statictext", undefined, "□");
-            mark.justify = "center";
-            mark.preferredSize = [16, 18];
-            setMarkFont(mark);
-
-            var label = row.add("statictext", undefined, item.label);
-            label.justify = "left";
-
-            item.row = row;
-            item.mark = mark;
-            item.labelControl = label;
-            item.index = i;
-            attachUnitPresetClickHandler(row, item);
-            attachUnitPresetClickHandler(mark, item);
-            attachUnitPresetClickHandler(label, item);
-            unitPresetItems.push(item);
-        }
-
-        updateUnitPresetDisplay();
-
-        return column;
-    }
-
     function getOptionDefinitions() {
         return [
             {
@@ -563,46 +498,6 @@ SCRIPTMETA-END
         ];
     }
 
-    function getUnitPresets() {
-        return [
-            {
-                label: "現状：" + formatUnitState(originalUnitState),
-                rulerType: originalUnitState.rulerType,
-                strokeUnits: originalUnitState.strokeUnits,
-                textUnits: originalUnitState.textUnits,
-                asianUnits: originalUnitState.asianUnits
-            },
-            {
-                label: "一般/線：mm　文字：級/歯",
-                rulerType: 1,
-                strokeUnits: 1,
-                textUnits: 5,
-                asianUnits: 5
-            },
-            {
-                label: "一般/線：pt　文字：pt",
-                rulerType: 2,
-                strokeUnits: 2,
-                textUnits: 2,
-                asianUnits: 2
-            },
-            {
-                label: "一般/線：px　文字：pt",
-                rulerType: 6,
-                strokeUnits: 6,
-                textUnits: 2,
-                asianUnits: 2
-            },
-            {
-                label: "一般/線：px　文字：px",
-                rulerType: 6,
-                strokeUnits: 6,
-                textUnits: 6,
-                asianUnits: 6
-            }
-        ];
-    }
-
     function attachOptionClickHandler(control, option) {
         attachMouseDownHandler(control, makeOptionClickHandler(option));
     }
@@ -618,21 +513,6 @@ SCRIPTMETA-END
         };
     }
 
-    function attachUnitPresetClickHandler(control, item) {
-        attachMouseDownHandler(control, makeUnitPresetClickHandler(item));
-    }
-
-    function makeUnitPresetClickHandler(item) {
-        return function () {
-            if (isDuplicateItemClick(item)) {
-                return;
-            }
-
-            rememberItemClick(item);
-            applyUnitPreset(item.index);
-        };
-    }
-
     function attachMouseDownHandler(control, handler) {
         try {
             control.addEventListener("mousedown", handler);
@@ -640,69 +520,6 @@ SCRIPTMETA-END
         } catch (e) { }
 
         control.onMouseDown = handler;
-    }
-
-    function cycleUnitPreset() {
-        var index = selectedUnitPresetIndex;
-        var nextIndex = index < 0 ? 0 : (index + 1) % unitPresetItems.length;
-        applyUnitPreset(nextIndex);
-    }
-
-    function applyUnitPreset(index) {
-        if (index < 0 || index >= unitPresetItems.length) {
-            return;
-        }
-
-        var preset = unitPresetItems[index];
-        selectedUnitPresetIndex = index;
-        app.preferences.setIntegerPreference("rulerType", preset.rulerType);
-        app.preferences.setIntegerPreference("strokeUnits", preset.strokeUnits);
-        app.preferences.setIntegerPreference("text/units", preset.textUnits);
-        app.preferences.setIntegerPreference("text/asianunits", preset.asianUnits);
-        updateUnitPresetDisplay();
-        refreshUnits();
-        focusKeySink();
-    }
-
-    function updateUnitPresetDisplay() {
-        for (var i = 0; i < unitPresetItems.length; i++) {
-            unitPresetItems[i].mark.text = i === selectedUnitPresetIndex ? "■" : "□";
-        }
-
-        refreshWindow();
-    }
-
-    function getCurrentUnitState() {
-        return {
-            rulerType: getIntegerPreference("rulerType"),
-            strokeUnits: getIntegerPreference("strokeUnits"),
-            textUnits: getIntegerPreference("text/units"),
-            asianUnits: getIntegerPreference("text/asianunits")
-        };
-    }
-
-    function formatUnitState(current) {
-        return "一般：" + getUnitLabel(current.rulerType, "rulerType") +
-            "　線：" + getUnitLabel(current.strokeUnits, "strokeUnits") +
-            "　文字：" + getUnitLabel(current.textUnits, "text/units") +
-            "　東ア：" + getUnitLabel(current.asianUnits, "text/asianunits");
-    }
-
-    function getUnitLabel(code, prefKey) {
-        if (code === 5) {
-            return prefKey === "text/units" ? "級" : "歯";
-        }
-
-        var labels = {
-            0: "in",
-            1: "mm",
-            2: "pt",
-            3: "pica",
-            4: "cm",
-            6: "px"
-        };
-
-        return hasOwn(labels, code) ? labels[code] : String(code);
     }
 
     function getOptionValue(option) {
@@ -751,12 +568,6 @@ SCRIPTMETA-END
     function refreshPreviewMode() {
         app.executeMenuCommand("preview");
         app.executeMenuCommand("preview");
-    }
-
-    function refreshUnits() {
-        app.redraw();
-        refreshTransformPanel();
-        app.redraw();
     }
 
     function refreshWindow() {
