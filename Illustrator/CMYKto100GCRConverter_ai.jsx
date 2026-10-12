@@ -3,7 +3,7 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
-Version=2.4
+Version=2.5
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=色を変えずにCMYK値を調整
 Author=Murakami Yoshiteru
@@ -16,6 +16,7 @@ Description-BEGIN
 ・K量の調整オプションで、Kを減らす方向または増やす方向へ段階的に寄せられます。増やすとより多くのグレートーンがKのみに、減らすとCMYからKを抜いてK濁りを抑えます。
 ・グローバルスウォッチ、グラデーションにも対応しています。
 ・変換したCMYKグローバルスウォッチの名前をCMYK値に更新し、独自の名前は括弧内に保持します。
+・「K100の自動墨ノセを回避」をオンにすると、選択範囲内で最終結果がK100かつ不透明度100%の単色を、K100/Y1の共通グローバルスウォッチ（Y設定値1.01%）に置き換え、対象のオーバープリント属性も解除します。
 
 ■注意！
 ・アピアランスで塗ったテキストはアピアランス分割してください。
@@ -64,7 +65,7 @@ var UI_TEXT = {
     },
     info: { ja: "情報", en: "Info" },
     optionGroup: { ja: "オプション", en: "Options" },
-    estimateTime: { ja: "予測時間", en: "Estimated time" },
+    estimateTime: { ja: "予測最大時間", en: "Estimated maximum time" },
     estimateHelp: {
         ja: "使用色数とキャッシュ利用数で変わるため、目安です。キャッシュ利用率20%程度で計算しています。",
         en: "This is only a guide. It varies by color count and cache usage, assuming about 20% cache use."
@@ -96,6 +97,16 @@ var UI_TEXT = {
         ja: "K+側で有効です。明るく色味のある薄い色で、CMYが減ってもKが十分増えない場合は、CMYを消す変換を採用しません。",
         en: "Available on the K+ side. For light colors with visible chroma, rejects conversions that remove CMY without adding enough K."
     },
+    avoidAutoBlackOverprint: { ja: "K100の自動墨ノセを回避", en: "Avoid automatic overprint for K100" },
+    avoidAutoBlackOverprintHelp: {
+        ja: "全オプション適用後、選択範囲内のC0/M0/Y0/K100の塗り・線・文字色をC0/M0/Y1/K100の共通グローバルスウォッチに置き換え、対象のオーバープリント属性を解除します。Yの設定値は1.01%とし、保存後も1%以上であることを確認します。元からK100のものも含みます。既に専用スウォッチを使う対象もオーバープリント属性を確認します。オブジェクトと親グループ・レイヤーの不透明度が全て100%の場合に適用します。グラデーションは対象外です。不透明マスクとアピアランス内の個別の不透明度は確認できません。",
+        en: "After all conversion options, replaces solid C0/M0/Y0/K100 fills, strokes, and text colors in the selection with one C0/M0/Y1/K100 global swatch and disables their overprint attributes, including existing K100 colors. Yellow is set to 1.01% and verified to remain at or above 1% after storage. Also checks overprint on eligible paints already using the dedicated swatch. The object and all parent groups and layers must have 100% opacity. Gradients are excluded. Opacity masks and individual appearance opacity cannot be checked."
+    },
+    autoBlackOverprintSwatchName: { ja: "自動墨ノセ回避K100", en: "K100 Auto Overprint Avoidance" },
+    autoBlackOverprintNotice: {
+        ja: "自動墨ノセ処理回避のため、K100オブジェクトをK100/Y1のグローバルスウォッチに登録しました。ノセにしたいものは個別に選択し、K100にしてください。",
+        en: "To avoid automatic black overprinting, K100 objects have been assigned to a K100/Y1 global swatch. For objects you want to overprint, select them individually and set them to K100."
+    },
     cmyKBalanceSliderHelp: {
         ja: "中央は変更なしです。K-側はKを減らしてCMYで補完し、K+側はCMYを減らしてKで補完します。中央から動かすほど許容色差が大きくなり、暗い色ではL値に応じて最大2倍まで広がります。",
         en: "Center leaves the result unchanged. K- reduces K and compensates with CMY; K+ reduces CMY and compensates with K. Moving away from center allows more color difference, expanding up to 2x for darker colors based on L*."
@@ -113,6 +124,10 @@ var UI_TEXT = {
         en: "Some names could not be updated because of name conflicts or read/write failures. Color conversions have been retained."
     },
     processingTime: { ja: "処理時間", en: "Processing time" },
+    processingTimeBreakdown: {
+        ja: "色変換・スウォッチ処理: {conversion}\n後処理・画面更新: {cleanup}\n選択更新: {selection}",
+        en: "Color conversion and swatches: {conversion}\nCleanup and redraw: {cleanup}\nSelection update: {selection}"
+    },
     cacheHitRate: { ja: "キャッシュヒット率", en: "Cache hit rate" },
     skippedCount: { ja: "未適用件数", en: "Skipped items" },
     skippedCountUnit: { ja: "件", en: "items" },
@@ -212,6 +227,10 @@ var DEFAULT_K_BOOST_ENABLED = false;
 var K_BOOST_AB_DELTA_AT_L100 = 10.0;
 var K_BOOST_BALANCE_VALUE = 100;
 var DEFAULT_LIGHT_COLOR_PROTECT_ENABLED = false;
+var DEFAULT_AVOID_AUTO_BLACK_OVERPRINT_ENABLED = false;
+var AUTO_BLACK_OVERPRINT_CMYK = { c: 0, m: 0, y: 1.01, k: 100 };
+var AUTO_BLACK_OVERPRINT_MIN_Y = 1;
+var AUTO_BLACK_OVERPRINT_CMYK_EPS = 1e-6; // Illustratorが返すCMYK百分率の微小な丸め誤差を許容
 var LIGHT_COLOR_PROTECT_L_MIN = 80;
 var LIGHT_COLOR_PROTECT_CHROMA_MIN = 2.0;
 var LIGHT_COLOR_PROTECT_CMY_REMOVED_MIN = 1.0;
@@ -227,6 +246,7 @@ var CMY_K_BALANCE_ENABLED = DEFAULT_CMY_K_BALANCE_ENABLED; // ScriptUIで「CMY�
 var CMY_K_BALANCE_VALUE = DEFAULT_CMY_K_BALANCE_VALUE; // -100..100、負はCMY寄り、正はK寄り
 var K_BOOST_ENABLED = DEFAULT_K_BOOST_ENABLED; // K+最大時、低彩度色をKのみで明度合わせする
 var LIGHT_COLOR_PROTECT_ENABLED = DEFAULT_LIGHT_COLOR_PROTECT_ENABLED; // K+側で薄い有彩色のCMY消失を抑える
+var AVOID_AUTO_BLACK_OVERPRINT_ENABLED = DEFAULT_AVOID_AUTO_BLACK_OVERPRINT_ENABLED;
 var SATURATION_BOOST_ENABLED = DEFAULT_SATURATION_BOOST_ENABLED; // ScriptUIで「彩度補正」がオンのときに有効化
 var SATURATION_BOOST_PCT = DEFAULT_SATURATION_BOOST_PCT; // a*, b* をこの割合だけ拡大
 
@@ -291,6 +311,14 @@ var SKIP_REASON_LABELS = {
     nonCMYK: { ja: "非CMYKカラー", en: "Non-CMYK color" },
     noCandidate: { ja: "許容色差内の変換候補なし", en: "No candidate within allowed difference" },
     spotWriteFailed: { ja: "スポットカラー更新不可", en: "Spot color update failed" },
+    autoBlackOverprintFailed: { ja: "墨ノセ回避色の適用不可", en: "Could not apply the automatic overprint avoidance color" },
+    autoBlackOverprintNameConflict: { ja: "墨ノセ回避スウォッチと同名の別の色あり", en: "Another color uses the overprint avoidance swatch name" },
+    autoBlackOverprintReadFailed: { ja: "墨ノセ回避スウォッチの確認不可", en: "Could not inspect the overprint avoidance swatch" },
+    autoBlackOverprintCreateFailed: { ja: "墨ノセ回避スウォッチの作成不可", en: "Could not create the overprint avoidance swatch" },
+    autoBlackOverprintUpdateFailed: { ja: "墨ノセ回避スウォッチの補正不可", en: "Could not update the overprint avoidance swatch" },
+    autoBlackOverprintVerifyFailed: { ja: "墨ノセ回避スウォッチのY値確認不可", en: "Could not verify the overprint avoidance swatch's yellow value" },
+    overprintWriteFailed: { ja: "オーバープリント解除不可", en: "Could not disable overprint" },
+    opacityReadFailed: { ja: "不透明度の確認不可", en: "Opacity could not be checked" },
     colorReadFailed: { ja: "カラー取得不可", en: "Color read failed" },
     colorWriteFailed: { ja: "カラー更新不可", en: "Color update failed" },
     textAttributesReadFailed: { ja: "テキスト属性取得不可", en: "Text attributes unavailable" },
@@ -877,7 +905,7 @@ function showConvertOptionsDialog(stats) {
     }
     chkSatBoost.onClick = updateEnabled;
 
-    // 未適用オブジェクト選択オプション
+    // 変換後の色処理と未適用オブジェクト選択オプション
     var optionPanel = dlg.add('panel', undefined, uiText('optionGroup'));
     optionPanel.alignment = 'fill';
     optionPanel.orientation = 'column';
@@ -885,7 +913,11 @@ function showConvertOptionsDialog(stats) {
     optionPanel.preferredSize.width = optionPanelWidth;
     optionPanel.margins = infoPanelMargins;
     optionPanel.spacing = 2;
-    optionPanel.helpTip = uiText('selectSkippedObjectsHelp');
+
+    var chkAvoidAutoBlackOverprint = optionPanel.add('checkbox', undefined, uiText('avoidAutoBlackOverprint'));
+    chkAvoidAutoBlackOverprint.alignment = ['left', 'center'];
+    chkAvoidAutoBlackOverprint.value = DEFAULT_AVOID_AUTO_BLACK_OVERPRINT_ENABLED;
+    chkAvoidAutoBlackOverprint.helpTip = uiText('avoidAutoBlackOverprintHelp');
 
     var skippedObjectsOptionGroup = optionPanel.add('group');
     skippedObjectsOptionGroup.orientation = 'row';
@@ -899,7 +931,7 @@ function showConvertOptionsDialog(stats) {
     chkSelectSkippedObjects.value = true;
     chkSelectSkippedObjects.helpTip = uiText('selectSkippedObjectsHelp');
 
-    // 対象数と予測時間
+    // 対象数と予測最大時間
     var infoPanel = dlg.add('panel', undefined, uiText('info'));
     infoPanel.alignment = 'fill';
     infoPanel.orientation = 'column';
@@ -964,6 +996,7 @@ function showConvertOptionsDialog(stats) {
         cmyKBalanceValue: CMY_K_BALANCE_VALUE,
         enableKBoost: false,
         enableLightColorProtect: false,
+        avoidAutoBlackOverprint: DEFAULT_AVOID_AUTO_BLACK_OVERPRINT_ENABLED,
         selectSkippedObjects: true
     };
 
@@ -983,6 +1016,7 @@ function showConvertOptionsDialog(stats) {
     result.enableCMYKBalance = result.cmyKBalanceValue !== 0;
     result.enableKBoost = result.cmyKBalanceValue === K_BOOST_BALANCE_VALUE && chkKBoost.value;
     result.enableLightColorProtect = result.cmyKBalanceValue > 0 && chkProtectLightColors.value;
+    result.avoidAutoBlackOverprint = chkAvoidAutoBlackOverprint.value;
     result.selectSkippedObjects = chkSelectSkippedObjects.value;
     return result;
 }
@@ -1052,6 +1086,7 @@ var spotReferenceKeys = [];
 var gradientReferenceKeys = [];
 var pendingSpotRenames = [];
 var spotRenameSkippedCount = 0;
+var autoBlackOverprintState = createAutoBlackOverprintState();
 var CMYK_SWATCH_NAME_PATTERN = /^[ \t]*C[ \t]*=[ \t]*(\d+(?:\.\d+)?)[ \t]+M[ \t]*=[ \t]*(\d+(?:\.\d+)?)[ \t]+Y[ \t]*=[ \t]*(\d+(?:\.\d+)?)[ \t]+K[ \t]*=[ \t]*(\d+(?:\.\d+)?)(?:[ \t]+\(([\s\S]*)\))?[ \t]*$/;
 
 function hostCollectionObjectKey(obj, prefix, references) {
@@ -1183,6 +1218,221 @@ function applyPendingSpotRenames(doc) {
         nameCounts[oldKey] = Math.max(0, (nameCounts[oldKey] || 0) - 1);
         nameCounts[newKey] = 1;
     }
+}
+
+function isK100CMYK(cmyk) {
+    return cmyk.c === 0 && cmyk.m === 0 && cmyk.y === 0 && cmyk.k === 100;
+}
+
+function isAutoBlackOverprintCMYK(cmyk) {
+    var expected = AUTO_BLACK_OVERPRINT_CMYK;
+    return Math.abs(cmyk.c - expected.c) <= AUTO_BLACK_OVERPRINT_CMYK_EPS &&
+        Math.abs(cmyk.m - expected.m) <= AUTO_BLACK_OVERPRINT_CMYK_EPS &&
+        (Math.abs(cmyk.y - expected.y) <= AUTO_BLACK_OVERPRINT_CMYK_EPS ||
+            Math.abs(cmyk.y - AUTO_BLACK_OVERPRINT_MIN_Y) <= AUTO_BLACK_OVERPRINT_CMYK_EPS) &&
+        Math.abs(cmyk.k - expected.k) <= AUTO_BLACK_OVERPRINT_CMYK_EPS;
+}
+
+function hasMinimumAutoBlackOverprintYellow(cmyk) {
+    return isAutoBlackOverprintCMYK(cmyk) && cmyk.y >= AUTO_BLACK_OVERPRINT_MIN_Y;
+}
+
+function verifyAutoBlackOverprintSpot(spot) {
+    var color = spot.color;
+    if (spot.colorType !== ColorModel.PROCESS || !color || color.typename !== 'CMYKColor' ||
+        !hasMinimumAutoBlackOverprintYellow(readCMYKValues(color))) {
+        throw new Error('Overprint avoidance swatch must retain at least 1% yellow');
+    }
+}
+
+function isAutoBlackOverprintSwatchName(name) {
+    var names = UI_TEXT.autoBlackOverprintSwatchName;
+    return name === names.ja || name === names.en;
+}
+
+function isAutoBlackOverprintDefinition(name, cmyk) {
+    return isAutoBlackOverprintSwatchName(name) && isAutoBlackOverprintCMYK(cmyk);
+}
+
+function readCMYKValues(color) {
+    return { c: color.cyan, m: color.magenta, y: color.yellow, k: color.black };
+}
+
+function readSolidProcessCMYK(color) {
+    if (!color) return null;
+    if (color.typename === 'SpotColor') {
+        // 濃度が100%未満なら、定義がK100でも使用箇所の色はK100ではない。
+        if (color.tint !== 100) return null;
+        var spot = color.spot;
+        if (!spot || spot.colorType !== ColorModel.PROCESS) return null;
+        color = spot.color;
+    }
+    if (!color || color.typename !== 'CMYKColor') return null;
+    return readCMYKValues(color);
+}
+
+function readFullyOpaqueState(item) {
+    // 1: 全階層100%、0: 半透明、-1: 取得できず判定不可。
+    try {
+        for (var depth = 0; item && depth < 1000; depth++) {
+            if (item.typename === 'Document') return 1;
+            var opacity = item.opacity;
+            if (typeof opacity !== 'number' || !isFinite(opacity)) return -1;
+            if (opacity !== 100) return 0;
+            item = item.parent;
+        }
+    } catch (e) { }
+    return -1;
+}
+
+function createAutoBlackOverprintState() {
+    return { tasks: [], spot: null, spotChecked: false, spotFailureReason: null, colorApplied: false };
+}
+
+function queueAutoBlackOverprintTask(target, propName, entry, alreadyChanged) {
+    var isText = entry.typeName === 'TextFrame';
+    var overprintPropName = propName === 'fillColor' ?
+        (isText ? 'overprintFill' : 'fillOverprint') :
+        (isText ? 'overprintStroke' : 'strokeOverprint');
+    autoBlackOverprintState.tasks.push({
+        target: target,
+        propName: propName,
+        overprintPropName: overprintPropName,
+        entry: entry,
+        alreadyChanged: alreadyChanged
+    });
+}
+
+function getAutoBlackOverprintSpot(doc) {
+    if (autoBlackOverprintState.spotChecked) return autoBlackOverprintState.spot;
+    autoBlackOverprintState.spotChecked = true;
+    var createdSpot = null;
+    var updatedSpot = null;
+    var previousColor = null;
+    var failureReason = 'autoBlackOverprintReadFailed';
+    try {
+        var definition = AUTO_BLACK_OVERPRINT_CMYK;
+        var name = uiText('autoBlackOverprintSwatchName');
+        var swatches = doc.swatches;
+        var nameConflict = false;
+        for (var i = 0, n = swatches.length; i < n; i++) {
+            var swatch = swatches[i];
+            var swatchName = swatch.name;
+            if (swatchName === name) nameConflict = true;
+            if (!isAutoBlackOverprintSwatchName(swatchName)) continue;
+            var color = swatch.color;
+            if (!color || color.typename !== 'SpotColor') continue;
+            var cmyk = readSolidProcessCMYK(color);
+            if (cmyk && isAutoBlackOverprintDefinition(swatchName, cmyk)) {
+                var existingSpot = color.spot;
+                if (!hasMinimumAutoBlackOverprintYellow(cmyk)) {
+                    // 旧版で保存したY1の微小誤差も識別し、実値が1%以上になるよう補正する。
+                    previousColor = makeCMYK(cmyk.c, cmyk.m, cmyk.y, cmyk.k);
+                    updatedSpot = existingSpot;
+                    failureReason = 'autoBlackOverprintUpdateFailed';
+                    existingSpot.color = makeCMYK(definition.c, definition.m, definition.y, definition.k);
+                    failureReason = 'autoBlackOverprintVerifyFailed';
+                    verifyAutoBlackOverprintSpot(existingSpot);
+                }
+                autoBlackOverprintState.spot = existingSpot;
+                return autoBlackOverprintState.spot;
+            }
+        }
+        // 同名の別の色を上書きしない。失敗は未適用として報告する。
+        if (nameConflict) {
+            autoBlackOverprintState.spotFailureReason = 'autoBlackOverprintNameConflict';
+            return null;
+        }
+        failureReason = 'autoBlackOverprintCreateFailed';
+        createdSpot = doc.spots.add();
+        createdSpot.colorType = ColorModel.PROCESS;
+        createdSpot.color = makeCMYK(definition.c, definition.m, definition.y, definition.k);
+        createdSpot.name = name;
+        if (createdSpot.name !== name) throw new Error('Unexpected swatch name');
+        failureReason = 'autoBlackOverprintVerifyFailed';
+        verifyAutoBlackOverprintSpot(createdSpot);
+        autoBlackOverprintState.spot = createdSpot;
+        return autoBlackOverprintState.spot;
+    } catch (e) {
+        autoBlackOverprintState.spotFailureReason = failureReason;
+        if (createdSpot) {
+            try { createdSpot.remove(); } catch (removeError) { }
+        }
+        if (updatedSpot && previousColor) {
+            try { updatedSpot.color = previousColor; } catch (restoreError) { }
+        }
+        return null;
+    }
+}
+
+function clearPaintOverprint(task) {
+    var propName = task.overprintPropName;
+    if (task.target[propName] === false) return false;
+    task.target[propName] = false;
+    if (task.target[propName] !== false) throw new Error('Overprint could not be disabled');
+    return true;
+}
+
+function applyAutoBlackOverprintTask(task, doc) {
+    var entry = task.entry;
+    var cmyk;
+    var dedicatedColor;
+    var alreadyProtected;
+    try {
+        var sourceColor = task.target[task.propName];
+        cmyk = readSolidProcessCMYK(sourceColor);
+        // 値で先に絞り、専用色でない場合の追加の名前取得を避ける。
+        dedicatedColor = cmyk && isAutoBlackOverprintCMYK(cmyk) &&
+            sourceColor.typename === 'SpotColor' && isAutoBlackOverprintDefinition(sourceColor.spot.name, cmyk);
+        alreadyProtected = dedicatedColor && hasMinimumAutoBlackOverprintYellow(cmyk);
+    } catch (e) {
+        return makeColorProcessResult(false, 'colorReadFailed');
+    }
+    if (!cmyk || (!isK100CMYK(cmyk) && !dedicatedColor)) return makeColorProcessResult(false);
+    if (typeof entry.autoBlackOverprintOpacityState === 'undefined') {
+        entry.autoBlackOverprintOpacityState = readFullyOpaqueState(entry.target);
+    }
+    if (entry.autoBlackOverprintOpacityState !== 1) {
+        return makeColorProcessResult(false, entry.autoBlackOverprintOpacityState < 0 ? 'opacityReadFailed' : null);
+    }
+    var paintChanged = false;
+    if (!alreadyProtected) {
+        var spot = getAutoBlackOverprintSpot(doc);
+        if (!spot) return makeColorProcessResult(false, autoBlackOverprintState.spotFailureReason || 'autoBlackOverprintFailed');
+        try {
+            var color = new SpotColor();
+            color.spot = spot;
+            color.tint = 100;
+            task.target[task.propName] = color;
+            paintChanged = true;
+            autoBlackOverprintState.colorApplied = true;
+        } catch (e2) {
+            return makeColorProcessResult(false, 'autoBlackOverprintFailed');
+        }
+    }
+    // 色の代入後に、対象の塗りまたは線の属性だけを解除する。
+    try {
+        if (clearPaintOverprint(task)) paintChanged = true;
+    } catch (e3) {
+        return makeColorProcessResult(paintChanged, 'overprintWriteFailed');
+    }
+    return makeColorProcessResult(paintChanged);
+}
+
+function applyAutoBlackOverprint(doc) {
+    // オフでは対象色・不透明度・スウォッチの判定を一切行わない。
+    if (!AVOID_AUTO_BLACK_OVERPRINT_ENABLED) return 0;
+    var tasks = autoBlackOverprintState.tasks;
+    var addedChanges = 0;
+    for (var i = 0, n = tasks.length; i < n; i++) {
+        checkpointProgress(); // 更新間隔の制御はcheckpoint内で行う。
+        var task = tasks[i];
+        var result = applyAutoBlackOverprintTask(task, doc);
+        if (result.reason) countSkip(task.entry, result.reason);
+        if (result.changed && !task.alreadyChanged) addedChanges++;
+    }
+    autoBlackOverprintState.tasks = [];
+    return addedChanges;
 }
 
 function trimLabCacheAfterSearch() {
@@ -1583,6 +1833,8 @@ function applyCMYKBalance(adj, targetLab) {
         out.m = clampPct(out.m * cmyScale);
         out.y = clampPct(out.y * cmyScale);
         var kRes = refineWithMaskLSPasses(out, targetLab, K_REFINE_MASK, CMY_K_BALANCE_REFINE_PASSES);
+        // 実際に書き込む整数・閾値適用後の色で、薄色保護と許容色差を判定する。
+        kRes = finalizedLabResult(kRes, targetLab);
         if (shouldProtectLightColorFromKBalance(adj, kRes, targetLab)) return adj;
         return acceptCMYKBalanceResult(adj, kRes, amount, targetLab) ? kRes : adj;
     } else {
@@ -2263,6 +2515,16 @@ function processedSpotStateResult(state) {
 
 function processSpotColorObject(sp, key, orig) {
     var spotResult = buildAdjustedColorResult(orig);
+    if (AVOID_AUTO_BLACK_OVERPRINT_ENABLED && spotResult.changed &&
+        isK100CMYK(spotResult.out) && isAutoBlackOverprintCMYK(orig)) {
+        // 全変換オプションの結果を確認してから、専用色のY1が丸めで消えるのを防ぐ。
+        try {
+            if (isAutoBlackOverprintDefinition(sp.name, orig)) {
+                markProcessedSpot(key, { reason: null });
+                return makeColorProcessResult(false, 'same');
+            }
+        } catch (nameError) { }
+    }
     if (!spotResult.changed) {
         var unchangedState = {
             reason: spotResult.reason === 'same' ? null : spotResult.reason
@@ -2319,12 +2581,7 @@ function processSpotColor(color) {
             });
             return makeColorProcessResult(false, 'nonCMYK');
         }
-        orig = {
-            c: baseColor.cyan,
-            m: baseColor.magenta,
-            y: baseColor.yellow,
-            k: baseColor.black
-        };
+        orig = readCMYKValues(baseColor);
     } catch (e) {
         if (sp && key) {
             markProcessedSpot(key, {
@@ -2355,12 +2612,7 @@ function processColorObject(color, typeName) {
 
     var orig;
     try {
-        orig = {
-            c: color.cyan,
-            m: color.magenta,
-            y: color.yellow,
-            k: color.black
-        };
+        orig = readCMYKValues(color);
     } catch (e2) {
         return makeColorProcessResult(false, 'colorReadFailed');
     }
@@ -2413,7 +2665,15 @@ function processColorPropertyCore(target, propName, allowGradient, entry) {
     if (allowGradient && typeName === 'GradientColor') {
         return processGradientColor(col, entry).changed;
     }
-    return applyColorResultToProperty(target, propName, processColorObject(col, typeName), entry, null);
+    var res = processColorObject(col, typeName);
+    var changed = applyColorResultToProperty(target, propName, res, entry, null);
+    if (AVOID_AUTO_BLACK_OVERPRINT_ENABLED &&
+        (typeName === 'CMYKColor' || typeName === 'SpotColor') &&
+        (changed > 0 || (res && !res.changed && isIgnoredColorProcessReason(res.reason)))) {
+        // 単色の使用箇所だけを保持する。共有グラデーションの停止点は変更しない。
+        queueAutoBlackOverprintTask(target, propName, entry, changed > 0);
+    }
+    return changed;
 }
 
 // GradientColor を処理（各ストップの CMYK/SpotColor） - カウンタ集計
@@ -2688,6 +2948,7 @@ function walkSelectionArtItems(visitor, unsupportedVisitor) {
 function makeSelectionArtItemEntry(target, typeName, owner, heartbeat) {
     var entry = {
         target: target,
+        typeName: typeName,
         owner: owner || target,
         tasks: [],
         attempts: 0,
@@ -2964,15 +3225,16 @@ function addBoldMultilineText(parent, text, width) {
     return st;
 }
 
-function addCompletionMetricCell(parent, labelKey, value, width) {
+function addCompletionMetricCell(parent, labelKey, value, width, helpTip) {
     var cell = parent.add('statictext', undefined, formatMetricText(labelKey, value));
     cell.alignment = ['left', 'center'];
     cell.justify = 'left';
     cell.preferredSize.width = width;
+    if (helpTip) cell.helpTip = helpTip;
     return cell;
 }
 
-function addCompletionMetricRow(parent, leftKey, leftValue, rightKey, rightValue, widths) {
+function addCompletionMetricRow(parent, leftKey, leftValue, rightKey, rightValue, widths, rightHelpTip) {
     var row = parent.add('group');
     row.orientation = 'row';
     row.alignment = 'left';
@@ -2980,8 +3242,19 @@ function addCompletionMetricRow(parent, leftKey, leftValue, rightKey, rightValue
     row.spacing = 18;
     row.margins = 0;
     addCompletionMetricCell(row, leftKey, leftValue, widths.left);
-    addCompletionMetricCell(row, rightKey, rightValue, widths.right);
+    addCompletionMetricCell(row, rightKey, rightValue, widths.right, rightHelpTip);
     return row;
+}
+
+function addCompletionPanel(parent, width) {
+    var panel = parent.add('panel', undefined, '');
+    panel.alignment = 'fill';
+    panel.orientation = 'column';
+    panel.alignChildren = ['left', 'center'];
+    panel.preferredSize.width = width;
+    panel.margins = [10, 10, 10, 10];
+    panel.spacing = 6;
+    return panel;
 }
 
 function showCompletionDialog(info) {
@@ -2999,7 +3272,7 @@ function showCompletionDialog(info) {
     metricsGroup.margins = 0;
     var metricWidths = completionMetricWidths(info);
     addCompletionMetricRow(metricsGroup, 'selectedObjects', info.selectedObjectCount, 'updatedColors', info.updatedColors, metricWidths);
-    addCompletionMetricRow(metricsGroup, 'cacheHitRate', info.cacheHitRate, 'processingTime', info.processingTime, metricWidths);
+    addCompletionMetricRow(metricsGroup, 'cacheHitRate', info.cacheHitRate, 'processingTime', info.processingTime, metricWidths, info.processingTimeHelp);
 
     if (info.swatchRenameSkippedCount > 0) {
         var renameSkipped = metricsGroup.add('statictext', undefined, formatMetricText('swatchRenameSkipped', info.swatchRenameSkippedCount));
@@ -3011,13 +3284,7 @@ function showCompletionDialog(info) {
         var breakdownLines = skippedBreakdownLines(info.skippedDetails);
         var skippedPanelWidth = completionSkippedPanelWidth(skippedTitle, breakdownLines);
         var skippedContentWidth = skippedPanelWidth - 20;
-        var skippedPanel = dlg.add('panel', undefined, '');
-        skippedPanel.alignment = 'fill';
-        skippedPanel.orientation = 'column';
-        skippedPanel.alignChildren = ['left', 'center'];
-        skippedPanel.preferredSize.width = skippedPanelWidth;
-        skippedPanel.margins = [10, 10, 10, 10];
-        skippedPanel.spacing = 6;
+        var skippedPanel = addCompletionPanel(dlg, skippedPanelWidth);
 
         var skippedTitleText = skippedPanel.add('statictext', undefined, skippedTitle);
         skippedTitleText.alignment = ['fill', 'center'];
@@ -3034,6 +3301,12 @@ function showCompletionDialog(info) {
         } else {
             skippedPanel.add('statictext', undefined, '');
         }
+    }
+
+    if (info.showAutoBlackOverprintNotice) {
+        var noticePanelWidth = Math.max(metricWidths.left + metricWidths.right + 18, skippedPanelWidth || 0);
+        var noticePanel = addCompletionPanel(dlg, noticePanelWidth);
+        addBoldMultilineText(noticePanel, uiText('autoBlackOverprintNotice'), noticePanelWidth - 20);
     }
 
     var btnGroup = dlg.add('group');
@@ -3058,6 +3331,7 @@ function cleanupAfterRun() {
         gradientReferenceKeys = [];
         pendingSpotRenames = [];
         spotRenameSkippedCount = 0;
+        autoBlackOverprintState = createAutoBlackOverprintState();
         cacheHitCount = 0;
         resultCacheLookupCount = 0;
         gSkipBreakdown = [];
@@ -3065,6 +3339,7 @@ function cleanupAfterRun() {
         CMY_K_BALANCE_VALUE = DEFAULT_CMY_K_BALANCE_VALUE;
         K_BOOST_ENABLED = DEFAULT_K_BOOST_ENABLED;
         LIGHT_COLOR_PROTECT_ENABLED = DEFAULT_LIGHT_COLOR_PROTECT_ENABLED;
+        AVOID_AUTO_BLACK_OVERPRINT_ENABLED = DEFAULT_AVOID_AUTO_BLACK_OVERPRINT_ENABLED;
         SATURATION_BOOST_ENABLED = DEFAULT_SATURATION_BOOST_ENABLED;
         SATURATION_BOOST_PCT = DEFAULT_SATURATION_BOOST_PCT;
         $.gc();
@@ -3102,6 +3377,7 @@ function cleanupAfterRun() {
         CMY_K_BALANCE_VALUE = opt.cmyKBalanceValue;
         K_BOOST_ENABLED = opt.enableKBoost;
         LIGHT_COLOR_PROTECT_ENABLED = opt.enableLightColorProtect;
+        AVOID_AUTO_BLACK_OVERPRINT_ENABLED = opt.avoidAutoBlackOverprint;
 
         gProgress = createProgressBar(stats.planned > 0 ? stats.planned : 100);
         var t0 = nowMs();
@@ -3109,6 +3385,9 @@ function cleanupAfterRun() {
         // 選択オブジェクトへ適用（色の置換）
         var appliedInfo = null;
         var totalSec = 0;
+        var conversionEndMs = t0;
+        var cleanupStartMs = t0;
+        var cleanupEndMs = t0;
         var completionInfo = null;
         var cancelled = false;
         var finalSkippedItems = [];
@@ -3119,8 +3398,11 @@ function cleanupAfterRun() {
                 // 名前を識別に使う変換ループの後で改名する。中断時も変換済みの分を反映する。
                 applyPendingSpotRenames(doc);
             }
+            if (AVOID_AUTO_BLACK_OVERPRINT_ENABLED) {
+                appliedInfo.count += applyAutoBlackOverprint(doc);
+            }
             finalSkippedItems = collectFinalSkippedItems(stats);
-            totalSec = (nowMs() - t0) / 1000.0; // 色変換とスウォッチ名更新の時間
+            conversionEndMs = nowMs();
             var skippedDetails = [];
             addSkipBreakdownEntries(skippedDetails, stats.unsupportedBreakdown);
             addSkipBreakdownEntries(skippedDetails, gSkipBreakdown);
@@ -3129,8 +3411,9 @@ function cleanupAfterRun() {
                 selectedObjectCount: formatNumberWithUnit(completionSelectedObjectCount, 'selectedObjectsUnit'),
                 updatedColors: appliedInfo.count,
                 swatchRenameSkippedCount: spotRenameSkippedCount,
+                showAutoBlackOverprintNotice: autoBlackOverprintState.colorApplied,
                 cacheHitRate: formatPercent(cacheHitCount, resultCacheLookupCount),
-                processingTime: formatCompletionSeconds(totalSec),
+                processingTime: "",
                 skippedCount: finalSkippedItems.length,
                 skippedMessage: "",
                 skippedDetails: skippedDetails
@@ -3142,13 +3425,16 @@ function cleanupAfterRun() {
                 throw e;
             }
         } finally {
+            cleanupStartMs = nowMs();
             cleanupAfterRun();
+            cleanupEndMs = nowMs();
         }
         if (cancelled) return;
 
+        var selectionStartMs = nowMs();
         if (opt.selectSkippedObjects) {
             var selectedSkippedCount = finalSkippedItems.length > 0 ? selectItems(doc, finalSkippedItems) : 0;
-            if (selectedSkippedCount === 0) {
+            if (finalSkippedItems.length === 0) {
                 clearSelection(doc);
             } else if (selectedSkippedCount < finalSkippedItems.length) {
                 completionInfo.skippedMessage = uiFormat('skippedObjectsPartiallySelected', {
@@ -3159,6 +3445,15 @@ function cleanupAfterRun() {
                 completionInfo.skippedMessage = uiText('skippedObjectsSelected');
             }
         }
+
+        var selectionEndMs = nowMs();
+        totalSec = (selectionEndMs - t0) / 1000.0;
+        completionInfo.processingTime = formatCompletionSeconds(totalSec);
+        completionInfo.processingTimeHelp = uiFormat('processingTimeBreakdown', {
+            conversion: formatCompletionSeconds((conversionEndMs - t0) / 1000.0),
+            cleanup: formatCompletionSeconds((cleanupEndMs - cleanupStartMs) / 1000.0),
+            selection: formatCompletionSeconds((selectionEndMs - selectionStartMs) / 1000.0)
+        });
 
         // 実行結果をダイアログ表示
         showCompletionDialog(completionInfo);
