@@ -3,4 +3,22 @@ SCRIPTMETA-DIST-BEGIN
 Script-ID=org.iwashi.InDesignCrop_RelinkFitter
 Version=2
 
+Script-ID=org.iwashi.AlignToKeyObject
+Version=1
+
+Script-ID=local.yamo.script_tgjzc681xeev
+Version=1
+
+Script-ID=org.iwashi.documentcolorsettingsviewer
+Version=0.5
+
+Script-ID=org.iwashi.EmbedAllLinks
+Version=1
+
+Script-ID=org.iwashi.MatchApplicationColorSettings
+Version=1
+
+Script-ID=org.iwashi.ShowLinkOption
+Version=1
+
 SCRIPTMETA-DIST-END

@@ -120,6 +120,14 @@ SCRIPTMETA-END
         linkUpdateFailed: {
             ja: "リンクを自動更新できませんでした。InDesignのリンクパネルを確認してください。",
             en: "The link could not be updated automatically. Check InDesign's Links panel."
+        },
+        placementFailed: {
+            ja: "画像の再配置に失敗しました。",
+            en: "Could not reposition the image."
+        },
+        placementRestoreFailed: {
+            ja: "画像を元の配置に戻せませんでした。「取り消し」で配置を確認してください。",
+            en: "Could not restore the original placement. Use Undo and check the image placement."
         }
     };
 
@@ -167,6 +175,8 @@ SCRIPTMETA-END
             }
 
             showPreviewDialog(preparedTarget.target);
+        } catch (error) {
+            alert(String(error.message || error));
         } finally {
             app.scriptPreferences.measurementUnit = originalUnit;
         }
@@ -314,6 +324,9 @@ SCRIPTMETA-END
         var selectedMode = resolveInitialMode(target);
         var mode1Text = buildModeOptionText(target, MODE_1, uiText("mode1Base"));
         var mode2Text = buildModeOptionText(target, MODE_2, uiText("mode2Base"));
+        var previewSucceeded = false;
+        var previewError = null;
+        var accepted = false;
 
         dialog.orientation = "column";
         dialog.alignChildren = ["fill", "top"];
@@ -337,9 +350,21 @@ SCRIPTMETA-END
         buttonGroup.add("button", undefined, uiText("cancelButton"), { name: "cancel" });
 
         function updatePreview(mode) {
-            selectedMode = mode;
-            restoreOriginalPlacement(target);
-            applyReplacementMode(target, mode);
+            previewSucceeded = false;
+            try {
+                if (!restoreOriginalPlacement(target)) {
+                    throw new Error(uiText("placementRestoreFailed"));
+                }
+                if (!applyReplacementMode(target, mode)) {
+                    throw new Error(uiText("placementFailed"));
+                }
+                selectedMode = mode;
+                previewSucceeded = true;
+            } catch (error) {
+                previewError = error;
+                dialog.close(0);
+                return;
+            }
             try {
                 app.refresh();
             } catch (e) {}
@@ -357,9 +382,14 @@ SCRIPTMETA-END
             updatePreview(selectedMode);
         };
 
-        var result = dialog.show();
-        if (result !== 1) {
-            restoreOriginalPlacement(target);
+        try {
+            var result = dialog.show();
+            if (previewError) throw previewError;
+            accepted = result === 1 && previewSucceeded;
+        } finally {
+            if (!accepted && !restoreOriginalPlacement(target)) {
+                throw new Error(uiText("placementRestoreFailed"));
+            }
         }
     }
 
@@ -445,10 +475,7 @@ SCRIPTMETA-END
     }
 
     function restoreOriginalPlacement(target) {
-        if (target.originalTransformSnapshot && restoreTransformSnapshot(target.graphic, target.originalTransformSnapshot)) {
-            return true;
-        }
-        return applyPlacementInPoints(target.frame, target.graphic, target.originalPlacement);
+        return restoreTransformSnapshot(target.graphic, target.originalTransformSnapshot);
     }
 
     function applyReplacementMode(target, mode) {
@@ -531,29 +558,14 @@ SCRIPTMETA-END
     }
 
     function applyGraphicScale(graphic, targetScale) {
+        if (!isFiniteNumber(targetScale.x) || !isFiniteNumber(targetScale.y) || targetScale.x <= 0 || targetScale.y <= 0) {
+            return false;
+        }
         try {
             graphic.horizontalScale = targetScale.x;
             graphic.verticalScale = targetScale.y;
             return true;
         } catch (e) {}
-
-        try {
-            graphic.absoluteHorizontalScale = targetScale.x;
-            graphic.absoluteVerticalScale = targetScale.y;
-            return true;
-        } catch (e2) {}
-
-        try {
-            graphic.resize(
-                CoordinateSpaces.INNER_COORDINATES,
-                AnchorPoint.TOP_LEFT_ANCHOR,
-                ResizeMethods.MULTIPLYING_CURRENT_DIMENSIONS_BY,
-                [targetScale.x / 100, targetScale.y / 100],
-                undefined,
-                false
-            );
-            return true;
-        } catch (e3) {}
 
         return false;
     }
@@ -562,23 +574,14 @@ SCRIPTMETA-END
         try {
             graphic.clearTransformations();
         } catch (e) {
-            try {
-                graphic.absoluteRotationAngle = 0;
-            } catch (e2) {}
-            try {
-                graphic.absoluteShearAngle = 0;
-            } catch (e3) {}
-            try {
-                graphic.absoluteHorizontalScale = 100;
-            } catch (e4) {}
-            try {
-                graphic.absoluteVerticalScale = 100;
-            } catch (e5) {}
+            return false;
         }
 
         try {
             frame.fit(FitOptions.CENTER_CONTENT);
-        } catch (e6) {}
+        } catch (e6) {
+            return false;
+        }
 
         var currentCorners = getRectangleCornerPoints(graphic);
         if (!currentCorners) {
@@ -660,24 +663,87 @@ SCRIPTMETA-END
             return null;
         }
 
-        if (typeof JSON !== "undefined" && JSON.parse) {
+        if (typeof JSON !== "undefined" && JSON && typeof JSON.parse === "function") {
             try {
                 return JSON.parse(text);
-            } catch (e) {}
+            } catch (e) {
+                return null;
+            }
         }
 
+        // JSONのないExtendScript環境でも、外部ファイルの値をコードとして実行しない。
+        var position = 0;
+        function skipWhitespace() {
+            while (position < text.length && /[\x20\t\r\n]/.test(text.charAt(position))) position++;
+        }
+        function readString() {
+            var match = /^"((?:[^"\\\x00-\x1f]|\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4}))*)"/.exec(text.substring(position));
+            if (!match) throw new Error("Invalid JSON string");
+            position += match[0].length;
+            return match[1].replace(/\\(["\\\/bfnrt]|u[0-9a-fA-F]{4})/g, function (escape, value) {
+                var escapes = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };
+                return value.charAt(0) === "u" ? String.fromCharCode(parseInt(value.substring(1), 16)) : escapes[value];
+            });
+        }
+        function readValue(depth) {
+            if (depth > 64) throw new Error("JSON nesting is too deep");
+            skipWhitespace();
+            var token = text.charAt(position);
+            var result;
+            var key;
+            if (token === '"') return readString();
+            if (token === "{" || token === "[") {
+                var isObject = token === "{";
+                var end = isObject ? "}" : "]";
+                result = isObject ? {} : [];
+                position++;
+                skipWhitespace();
+                if (text.charAt(position) === end) {
+                    position++;
+                    return result;
+                }
+                while (position < text.length) {
+                    skipWhitespace();
+                    if (isObject) {
+                        key = readString();
+                        if (key === "__proto__") throw new Error("Invalid JSON key");
+                        skipWhitespace();
+                        if (text.charAt(position++) !== ":") throw new Error("Expected colon");
+                        result[key] = readValue(depth + 1);
+                    } else {
+                        result.push(readValue(depth + 1));
+                    }
+                    skipWhitespace();
+                    token = text.charAt(position++);
+                    if (token === end) return result;
+                    if (token !== ",") throw new Error("Expected comma");
+                }
+                throw new Error("Unterminated JSON value");
+            }
+            var literal = /^(true|false|null)/.exec(text.substring(position));
+            if (literal) {
+                position += literal[0].length;
+                return literal[0] === "null" ? null : literal[0] === "true";
+            }
+            var number = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/.exec(text.substring(position));
+            if (!number) throw new Error("Invalid JSON value");
+            position += number[0].length;
+            return Number(number[0]);
+        }
         try {
-            return eval("(" + text + ")");
+            var parsed = readValue(0);
+            skipWhitespace();
+            return position === text.length ? parsed : null;
         } catch (e2) {}
 
         return null;
     }
 
     function validateReplacementData(replacementData) {
-        if (!replacementData) {
+        if (!replacementData || typeof replacementData !== "object" || replacementData instanceof Array) {
             return uiText("noXmpOnSelectedImage");
         }
-        if (Number(replacementData.version) !== REPLACEMENT_DATA_VERSION) {
+        if (replacementData.version !== REPLACEMENT_DATA_VERSION) {
             return uiText("unsupportedXmpVersion");
         }
         if (String(replacementData.unit || "") !== REPLACEMENT_DATA_UNIT) {
@@ -686,15 +752,19 @@ SCRIPTMETA-END
         if (!isValidReplacementMode(replacementData.mode1) || !isValidReplacementMode(replacementData.mode2)) {
             return uiText("xmpDataInvalid");
         }
+        if (!isFiniteNumber(replacementData.mode1.rotation !== undefined ? replacementData.mode1.rotation : replacementData.rotation) ||
+            !isFiniteNumber(replacementData.mode2.rotation !== undefined ? replacementData.mode2.rotation : replacementData.rotation)) {
+            return uiText("xmpDataInvalid");
+        }
         return "";
     }
 
     function isValidReplacementMode(mode) {
-        return mode &&
+        return mode && typeof mode === "object" && !(mode instanceof Array) &&
             isFiniteNumber(mode.x) &&
             isFiniteNumber(mode.y) &&
             isFiniteNumber(mode.w) &&
-            isFiniteNumber(mode.h);
+            isFiniteNumber(mode.h) && mode.w > 0 && mode.h > 0;
     }
 
     function isFiniteNumber(value) {
@@ -703,12 +773,13 @@ SCRIPTMETA-END
 
     function getCurrentPlacementSnapshot(frame, graphic) {
         var placement = getCurrentPlacementInfo(frame, graphic);
-        if (!placement) {
+        var matrix = readGraphicTransformMatrix(graphic);
+        if (!placement || !matrix) {
             return null;
         }
         return {
             placement: placement,
-            transformMatrix: readGraphicTransformMatrix(graphic)
+            transformMatrix: matrix
         };
     }
 
@@ -716,7 +787,12 @@ SCRIPTMETA-END
         try {
             var values = graphic.transformValuesOf(CoordinateSpaces.SPREAD_COORDINATES);
             if (values && values.length > 0) {
-                return values[0];
+                var matrix = values[0].matrixValues;
+                if (!matrix || matrix.length !== 6) return null;
+                for (var i = 0; i < matrix.length; i++) {
+                    if (!isFiniteNumber(matrix[i])) return null;
+                }
+                return matrix.slice(0);
             }
         } catch (e) {}
         return null;
@@ -729,9 +805,10 @@ SCRIPTMETA-END
         try {
             graphic.transform(
                 CoordinateSpaces.SPREAD_COORDINATES,
-                AnchorPoint.TOP_LEFT_ANCHOR,
+                [0, 0],
                 snapshot.transformMatrix,
-                true
+                [MatrixContent.SCALE_VALUES, MatrixContent.SHEAR_VALUE, MatrixContent.ROTATION_VALUE, MatrixContent.TRANSLATION_VALUES],
+                false
             );
             return true;
         } catch (e) {}
@@ -754,6 +831,7 @@ SCRIPTMETA-END
             frameCorners.topRight,
             frameCorners.bottomLeft
         );
+        if (!localTL) return null;
 
         return {
             leftTopX: localTL.x,
@@ -811,7 +889,7 @@ SCRIPTMETA-END
                 try {
                     updatedLink = link.update();
                     refreshedTarget = resolveGraphicAfterLinkUpdate(frame, graphic, updatedLink);
-                    if (refreshedTarget) {
+                    if (refreshedTarget && getGraphicLink(refreshedTarget.graphic).status === LinkStatus.NORMAL) {
                         return createLinkPreparationResult(
                             refreshedTarget.frame,
                             refreshedTarget.graphic,
@@ -915,22 +993,14 @@ SCRIPTMETA-END
         var seen = {};
 
         for (var i = 0; i < selection.length; i++) {
-            var candidate = getGraphicFromSelection(selection[i]);
-            var key = null;
-            if (!candidate) {
-                continue;
+            var candidates = getGraphicsFromSelection(selection[i]);
+            for (var j = 0; j < candidates.length; j++) {
+                var candidate = candidates[j];
+                var key = getGraphicSelectionKey(candidate);
+                if (!key || seen[key]) continue;
+                if (!appendSelectedGraphicResult(results, candidate)) continue;
+                seen[key] = true;
             }
-
-            key = getGraphicSelectionKey(candidate);
-            if (!key || seen[key]) {
-                continue;
-            }
-
-            if (!appendSelectedGraphicResult(results, candidate)) {
-                continue;
-            }
-
-            seen[key] = true;
         }
 
         return results;
@@ -952,29 +1022,29 @@ SCRIPTMETA-END
     }
 
     function getGraphicFromSelection(item) {
-        var constructorName = "";
+        var graphics = getGraphicsFromSelection(item);
+        return graphics.length === 1 ? graphics[0] : null;
+    }
 
-        try {
-            constructorName = item.constructor.name;
-        } catch (e) {}
-
-        if (constructorName === "Image" || constructorName === "PDF" || constructorName === "EPS") {
-            return item;
+    function getGraphicsFromSelection(item) {
+        // graphics[0]などから取得した参照は、具体的な型名ではなくGraphicを返すことがある。
+        if (getGraphicLink(item)) {
+            return [item];
         }
 
         try {
             if (item.allGraphics && item.allGraphics.length > 0) {
-                return item.allGraphics[0];
+                return item.allGraphics;
             }
         } catch (e2) {}
 
         try {
             if (item.graphics && item.graphics.length > 0) {
-                return item.graphics[0];
+                return item.graphics.everyItem().getElements();
             }
         } catch (e3) {}
 
-        return null;
+        return [];
     }
 
     function getGraphicFrame(graphic) {
@@ -1027,10 +1097,9 @@ SCRIPTMETA-END
             return null;
         }
 
-        return {
-            width: distance(corners.topLeft, corners.topRight),
-            height: distance(corners.topLeft, corners.bottomLeft)
-        };
+        var width = distance(corners.topLeft, corners.topRight);
+        var height = distance(corners.topLeft, corners.bottomLeft);
+        return isFiniteNumber(width) && isFiniteNumber(height) && width > 0 && height > 0 ? {width: width, height: height} : null;
     }
 
     function getRectangleCornerPoints(item) {
@@ -1144,7 +1213,9 @@ SCRIPTMETA-END
     function toNumberPoint(value) {
         if (value instanceof Array) {
             if (value.length === 2 && !(value[0] instanceof Array)) {
-                return [Number(value[0]), Number(value[1])];
+                var x = Number(value[0]);
+                var y = Number(value[1]);
+                return isFiniteNumber(x) && isFiniteNumber(y) ? [x, y] : null;
             }
             if (value.length > 0) {
                 return toNumberPoint(value[0]);
@@ -1158,10 +1229,12 @@ SCRIPTMETA-END
         var xAxis = normalizeVector(subtractPoints(frameTR, frameTL));
         var yAxis = normalizeVector(subtractPoints(frameBL, frameTL));
         var vector = subtractPoints(point, frameTL);
+        var determinant = xAxis[0] * yAxis[1] - xAxis[1] * yAxis[0];
+        if (Math.abs(determinant) < 0.0000000001) return null;
 
         return {
-            x: dotProduct(vector, xAxis),
-            y: dotProduct(vector, yAxis)
+            x: (vector[0] * yAxis[1] - vector[1] * yAxis[0]) / determinant,
+            y: (xAxis[0] * vector[1] - xAxis[1] * vector[0]) / determinant
         };
     }
 
@@ -1186,10 +1259,6 @@ SCRIPTMETA-END
         }
 
         return [vector[0] / length, vector[1] / length];
-    }
-
-    function dotProduct(v1, v2) {
-        return v1[0] * v2[0] + v1[1] * v2[1];
     }
 
     function distance(p1, p2) {
