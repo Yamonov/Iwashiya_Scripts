@@ -22,6 +22,6 @@ Script-ID=org.iwashi.ShowLinkOption
 Version=1
 
 Script-ID=org.iwashi.FindLinksByName
-Version=1
+Version=1.1
 
 SCRIPTMETA-DIST-END

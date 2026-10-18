@@ -1,7 +1,7 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.FindLinksByName
-Version=1
+Version=1.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/InDesgin
 Name=リンクファイル名で検索
 Author=Murakami Yoshiteru
@@ -10,7 +10,10 @@ Description-BEGIN
 現在のドキュメントのリンクを、ファイル名で検索します。
 検索方法は「先頭一致」「部分一致」「拡張子のみ」「正規表現」から選択できます。英字の大文字と小文字は区別しません。
 起動時にリンク情報を取得し、一覧上部の入力欄に入力するたびに結果を絞り込みます。入力欄が空なら全件を表示します。
-リンク状態・ページ番号・ファイル名・パス・実効ppi・形式・カラーモード・配置レイヤーを一覧表示します。長いパスは先頭を省略します。
+標準の縦型は「S・P・ファイル名」の一覧と、選択したリンクの詳細を左右に表示します。ファイル名・親フォルダのパス・ドライブ名は折り返して全文を表示します。
+検索欄右のボタンで横型に切り替えると、リンク状態・ページ番号・ファイル名・パス・実効ppi・形式・カラーモード・配置レイヤーを一覧表示します。
+切り替え時も検索条件と選択を維持します。横型の長いパスは先頭を省略します。
+ウインドウはリサイズでき、縦型・横型それぞれのサイズを開いている間は維持します。
 リンク状態は最左列に、リンク切れを「×」、正常を空欄、その他を「△」で表示します。
 正規表現が未完成または無効な間は、直前の結果を残してメッセージを表示します。
 結果を選択すると、そのページへ移動し、配置オブジェクトを中央に表示します。一覧は「閉じる」またはEscで閉じます。
@@ -66,6 +69,7 @@ SCRIPTMETA-END
     function collectLinks(document) {
         var results = [];
         var links = document.links.everyItem().getElements();
+        var startupDrive = getStartupDriveName();
         for (var i = 0; i < links.length; i++) {
             var link = links[i];
             if (!link.isValid) continue;
@@ -84,7 +88,17 @@ SCRIPTMETA-END
                 } catch (pageOrderError) {}
             }
             var path = "";
-            try { if (link.filePath) path = File(link.filePath).fsName; } catch (pathError) {}
+            var parentPath = "";
+            var drive = "—";
+            try {
+                if (link.filePath) {
+                    var rawPath = String(link.filePath);
+                    var file = File(rawPath);
+                    path = file.fsName;
+                    parentPath = file.parent.fsName;
+                    drive = getDriveName(path, rawPath, Folder.fs, startupDrive);
+                }
+            } catch (pathError) {}
             var details = getLinkDetails(link, item);
             var linkStatus = link.status;
             results.push({
@@ -94,6 +108,8 @@ SCRIPTMETA-END
                 foldedName: foldedName,
                 extension: dot > 0 ? foldedName.substring(dot + 1) : "",
                 path: path,
+                parentPath: parentPath,
+                drive: drive,
                 pageName: pageName,
                 pageOrder: pageOrder,
                 status: statusLabel(linkStatus),
@@ -109,6 +125,36 @@ SCRIPTMETA-END
             return a.pageOrder - b.pageOrder || a.order - b.order;
         });
         return results;
+    }
+
+    function getStartupDriveName() {
+        if (Folder.fs !== "Macintosh") return "—";
+        try {
+            var volumes = Folder("/Volumes").getFiles();
+            for (var i = 0; i < volumes.length; i++) {
+                if (volumes[i] instanceof Folder && volumes[i].fsName === "/") {
+                    return String(volumes[i].displayName || File.decode(volumes[i].name));
+                }
+            }
+        } catch (volumeError) {}
+        return "—";
+    }
+
+    function getDriveName(path, rawPath, fileSystem, startupDrive) {
+        var normalized = String(path).replace(/\\/g, "/");
+        var match = /^([A-Za-z]:)(?:\/|$)/.exec(normalized);
+        if (match) return match[1].toUpperCase();
+        match = /^\/\/([^\/]+)\/([^\/]+)/.exec(normalized);
+        if (match) return "\\\\" + match[1] + "\\" + match[2];
+        if (fileSystem === "Macintosh") {
+            // HFS形式なら、未接続のボリューム名も記録されたパスから取得できる。
+            match = /^([^\/:]+):/.exec(String(rawPath));
+            if (match) return match[1];
+            match = /^\/Volumes\/([^\/]+)/.exec(normalized);
+            if (match) return match[1];
+            if (normalized.charAt(0) === "/") return startupDrive || "—";
+        }
+        return "—";
     }
 
     function statusLabel(status) {
@@ -192,47 +238,225 @@ SCRIPTMETA-END
     }
 
     function createSearchDialog(document, results) {
-        var dialog = new Window("dialog", "リンクファイル名で検索");
-        dialog.orientation = "column";
-        dialog.alignChildren = ["fill", "top"];
-        dialog.spacing = 12;
-        dialog.margins = 12;
-
+        var dialog = new Window("dialog", "リンクファイル名で検索", undefined, {resizeable: true});
         var searchRow = dialog.add("group");
-        searchRow.orientation = "row";
-        searchRow.alignChildren = ["left", "center"];
-        searchRow.spacing = 8;
         var method = searchRow.add("dropdownlist", undefined, ["先頭一致", "部分一致", "拡張子のみ", "正規表現"]);
         method.selection = 1;
         method.helpTip = "検索方法";
         var input = searchRow.add("edittext", undefined, "");
-        input.alignment = ["fill", "center"];
         input.helpTip = "入力するたびに絞り込みます。拡張子のみの場合は psd または .psd のように入力します。";
-        var message = dialog.add("statictext", undefined, "");
-        // メッセージの長さや検索件数によってダイアログの高さを変えない。
-        message.preferredSize.height = 18;
+        var toggle = searchRow.add("button", undefined, "横型");
+        var message = dialog.add("statictext", undefined, "", {multiline: true});
+        var body = dialog.add("group");
+        var buttons = dialog.add("group");
+        var close = buttons.add("button", undefined, "閉じる", {name: "cancel"});
+        dialog.cancelElement = close;
+        dialog.defaultElement = null;
+        close.onClick = function () { dialog.close(0); };
 
-        var widths = [44, 90, 250, 300, 110, 110, 110, 140];
-        var listWidth = 24;
-        for (var column = 0; column < widths.length; column++) listWidth += widths[column];
-        var list = dialog.add("listbox", undefined, [], {
-            multiselect: false,
-            numberOfColumns: widths.length,
-            showHeaders: true,
-            columnTitles: ["状態", "ページ番号", "ファイル名", "パス", "実効ppi", "形式", "カラーモード", "配置レイヤー"],
-            columnWidths: widths
-        });
-        list.preferredSize = [listWidth, 28 + Math.max(4, Math.min(12, results.length)) * 24];
-        var listHelp = "結果を選ぶと配置オブジェクトを表示します。×：リンク切れ、空欄：正常、△：その他。取得できない項目は「—」で表示します。";
-        list.helpTip = listHelp;
-        for (var i = 0; i < results.length; i++) {
-            results[i].displayPath = shortenPath(results[i].path, widths[3] - 20, list.graphics);
-        }
-
+        var portrait = true;
+        var portraitMinimum = [528, 646];
+        var portraitSize = [528, 969]; // 従来の内容高646pxの1.5倍。
+        var landscapeSize = [1202, 28 + Math.max(4, Math.min(12, results.length)) * 24 + 132];
+        var landscapeWidths = [44, 90, 250, 300, 110, 110, 110, 140];
+        var list = null;
+        var details = null;
+        var detailsViewport = null;
+        var detailsScroll = null;
+        var detailControls = null;
+        var detailWidth = 208;
+        var lastDetailLinkId = null;
+        var fields = [
+            ["name", "ファイル名", true],
+            ["status", "状態", false],
+            ["parentPath", "パス", true],
+            ["drive", "ドライブ", true],
+            ["pageName", "ページ", false],
+            ["layer", "レイヤー", false],
+            ["format", "形式", false],
+            ["colorMode", "モード", false]
+        ];
         var visibleResults = [];
         var updatingList = false;
+        var resizing = false;
+        var builtBodyWidth = 0;
         var lastQuery = null;
         var lastMode = null;
+        var listHelp = "結果を選ぶと配置オブジェクトを表示します。×：リンク切れ、空欄：正常、△：その他。取得できない項目は「—」で表示します。";
+
+        function selectedResult() {
+            return list && list.selection ? list.selection.result : null;
+        }
+
+        function setBounds(control, x, y, width, height) {
+            control.bounds = [x, y, x + width, y + height];
+        }
+
+        function listWidthFor(contentWidth) {
+            return portrait ? 284 + Math.floor((contentWidth - 504) * 0.55) : contentWidth;
+        }
+
+        function layoutControls() {
+            if (!list || updatingList) return;
+            var width = dialog.size.width;
+            var height = dialog.size.height;
+            var contentWidth = width - 24;
+            var messageHeight = portrait ? 32 : 18;
+            var bodyTop = 62 + messageHeight;
+            var bodyHeight = height - bodyTop - 52;
+            setBounds(searchRow, 12, 12, contentWidth, 26);
+            setBounds(method, 0, 0, 100, 26);
+            setBounds(input, 108, 0, contentWidth - 176, 26);
+            setBounds(toggle, contentWidth - 60, 0, 60, 26);
+            setBounds(message, 12, 50, contentWidth, messageHeight);
+            setBounds(body, 12, bodyTop, contentWidth, bodyHeight);
+            setBounds(buttons, width - 98, height - 40, 86, 28);
+            setBounds(close, 0, 0, 86, 28);
+            var listWidth = listWidthFor(contentWidth);
+            setBounds(list, 0, 0, listWidth, bodyHeight);
+            if (portrait) {
+                detailWidth = contentWidth - listWidth - 12;
+                updateDetails(selectedResult());
+            }
+        }
+
+        function buildBody(selectedId) {
+            updatingList = true;
+            try {
+                while (body.children.length) body.remove(body.children[0]);
+                details = null;
+                detailsViewport = null;
+                detailsScroll = null;
+                detailControls = null;
+                var contentWidth = dialog.size.width - 24;
+                var listWidth = listWidthFor(contentWidth);
+                var widths = portrait ? [28, 44, listWidth - 96] : landscapeWidths.slice(0);
+                if (!portrait) widths[3] += contentWidth - 1178;
+                var titles = portrait ? ["S", "P", "ファイル名"] :
+                    ["状態", "ページ番号", "ファイル名", "パス", "実効ppi", "形式", "カラーモード", "配置レイヤー"];
+                list = body.add("listbox", undefined, [], {
+                    multiselect: false,
+                    numberOfColumns: widths.length,
+                    showHeaders: true,
+                    columnTitles: titles,
+                    columnWidths: widths
+                });
+                list.helpTip = listHelp;
+                list.onChange = selectResult;
+                if (portrait) {
+                    detailsViewport = body.add("panel");
+                    details = detailsViewport.add("group");
+                    detailsScroll = body.add("scrollbar", [0, 0, 12, 100], 0, 0, 1);
+                    detailsScroll.visible = false;
+                    detailsScroll.stepdelta = 20;
+                    detailsScroll.onChanging = detailsScroll.onChange = function () {
+                        details.location = [0, -Math.round(detailsScroll.value)];
+                    };
+                    detailControls = {};
+                    for (var i = 0; i < fields.length; i++) {
+                        var group = details.add("group");
+                        var label = fields[i][2] ? group.add("statictext", undefined, fields[i][1]) : null;
+                        var value = group.add("statictext", undefined, "—", {multiline: fields[i][2]});
+                        detailControls[fields[i][0]] = {group: group, label: label, value: value};
+                    }
+                } else {
+                    for (var j = 0; j < results.length; j++) {
+                        results[j].displayPath = shortenPath(results[j].path, widths[3] - 20, list.graphics);
+                    }
+                }
+                builtBodyWidth = contentWidth;
+            } finally {
+                updatingList = false;
+            }
+            layoutControls();
+            populateList(selectedId);
+        }
+
+        function updateDetails(result) {
+            if (!detailControls) return;
+            for (var i = 0; i < fields.length; i++) {
+                var key = fields[i][0];
+                var text = result ? String(result[key] || "—") : "—";
+                var value = detailControls[key].value;
+                if (fields[i][2]) {
+                    value.text = text;
+                    value.helpTip = text;
+                } else {
+                    value.text = fields[i][1] + "：" + text;
+                    value.helpTip = value.text;
+                }
+            }
+            var linkId = result ? result.linkId : null;
+            if (linkId !== lastDetailLinkId) detailsScroll.value = 0;
+            lastDetailLinkId = linkId;
+            layoutDetails();
+        }
+
+        function layoutDetailFields(width) {
+            var top = 0;
+            for (var i = 0; i < fields.length; i++) {
+                var field = detailControls[fields[i][0]];
+                var valueHeight = 18;
+                if (fields[i][2]) {
+                    // ScriptUIと同じフォント・表示幅で、折り返し後の全文の高さを測る。
+                    var graphics = field.value.graphics;
+                    var measured = graphics.measureString(field.value.text, graphics.font, Math.max(1, width - 4));
+                    valueHeight = Math.max(18, Math.ceil(measured[1]) + 4);
+                }
+                var valueTop = fields[i][2] ? 21 : 0;
+                var fieldHeight = valueTop + valueHeight;
+                setBounds(field.group, 0, top, width, fieldHeight);
+                if (field.label) setBounds(field.label, 0, 0, width, 18);
+                setBounds(field.value, 0, valueTop, width, valueHeight);
+                top += fieldHeight + 10;
+            }
+            return top - 10;
+        }
+
+        function layoutDetails() {
+            var height = layoutDetailFields(detailWidth);
+            var scrollNeeded = height > body.size.height;
+            var width = scrollNeeded ? detailWidth - 16 : detailWidth;
+            if (scrollNeeded) height = layoutDetailFields(width);
+            var viewportHeight = Math.min(height, body.size.height);
+            setBounds(detailsViewport, list.size.width + 12, 0, width, viewportHeight);
+            detailsScroll.maxvalue = Math.max(1, height - viewportHeight);
+            detailsScroll.value = scrollNeeded ? Math.min(detailsScroll.value, height - viewportHeight) : 0;
+            detailsScroll.jumpdelta = Math.max(20, viewportHeight - 20);
+            detailsScroll.visible = scrollNeeded;
+            setBounds(detailsScroll, list.size.width + 12 + width + 4, 0, 12, viewportHeight);
+            // 収まる場合は上に詰め、長文の場合だけ詳細欄をスクロールする。
+            setBounds(details, 0, -Math.round(detailsScroll.value), width, height);
+        }
+
+        function populateList(selectedId) {
+            updatingList = true;
+            try {
+                list.removeAll();
+                list.helpTip = listHelp;
+                for (var i = 0; i < visibleResults.length; i++) {
+                    var result = visibleResults[i];
+                    var row = list.add("item", result.statusIcon);
+                    row.subItems[0].text = result.pageName;
+                    row.subItems[1].text = result.name;
+                    if (!portrait) {
+                        row.subItems[2].text = result.displayPath;
+                        row.subItems[3].text = result.effectivePpi;
+                        row.subItems[4].text = result.format;
+                        row.subItems[5].text = result.colorMode;
+                        row.subItems[6].text = result.layer;
+                    }
+                    row.result = result;
+                    if (result.linkId === selectedId) {
+                        list.selection = row;
+                        list.helpTip = result.status + "\n" + (result.path || "パスなし");
+                    }
+                }
+            } finally {
+                updatingList = false;
+            }
+            updateDetails(selectedResult());
+        }
 
         function updateResults() {
             var query = input.text;
@@ -242,7 +466,6 @@ SCRIPTMETA-END
             lastMode = mode;
             var matcher;
             try {
-                // 正規表現は入力更新ごとに一度だけ作成する。
                 matcher = createMatcher(mode, query);
             } catch (error) {
                 message.text = "正規表現が未完成または無効です。直前の結果を表示しています。";
@@ -252,68 +475,94 @@ SCRIPTMETA-END
             for (var index = 0; index < results.length; index++) {
                 if (matcher(results[index])) nextResults.push(results[index]);
             }
-
-            // 一致する配置が同じなら、選択やスクロール位置を保って再描画を省く。
             var changed = visibleResults.length !== nextResults.length;
             for (var j = 0; !changed && j < nextResults.length; j++) {
                 if (visibleResults[j].linkId !== nextResults[j].linkId) changed = true;
             }
             if (changed) {
-                var selectedId = list.selection ? list.selection.result.linkId : null;
-                updatingList = true;
-                try {
-                    list.removeAll();
-                    list.helpTip = listHelp;
-                    for (var k = 0; k < nextResults.length; k++) {
-                        var result = nextResults[k];
-                        var row = list.add("item", result.statusIcon);
-                        row.subItems[0].text = result.pageName;
-                        row.subItems[1].text = result.name;
-                        row.subItems[2].text = result.displayPath;
-                        row.subItems[3].text = result.effectivePpi;
-                        row.subItems[4].text = result.format;
-                        row.subItems[5].text = result.colorMode;
-                        row.subItems[6].text = result.layer;
-                        row.result = result;
-                        if (result.linkId === selectedId) {
-                            list.selection = row;
-                            list.helpTip = result.status + "\n" + (result.path || "パスなし");
-                        }
-                    }
-                    visibleResults = nextResults;
-                } finally {
-                    updatingList = false;
-                }
+                var selected = selectedResult();
+                visibleResults = nextResults;
+                populateList(selected ? selected.linkId : null);
             }
             message.text = nextResults.length + "件 / 全" + results.length + "件" +
                 (nextResults.length ? "" : "　該当するリンクはありません。");
         }
 
-        // 参照元の候補一覧と同じく、行の選択でInDesign側の表示を切り替える。
-        list.onChange = function () {
+        function selectResult() {
             // マウスで行を選んでもactiveがfalseの場合があるため、フォーカスでは判定しない。
-            if (updatingList || !list.selection) return;
-            var selected = list.selection.result;
+            if (updatingList) return;
+            var selected = selectedResult();
+            updateDetails(selected);
+            if (!selected) return;
             list.helpTip = selected.status + "\n" + (selected.path || "パスなし");
             try {
                 showPlacement(document, selected.linkId);
             } catch (error) {
                 alert("配置オブジェクトを表示できません。\n" + String(error.message || error));
             }
+        }
+
+        function rememberSize() {
+            var size = [dialog.size.width, dialog.size.height];
+            if (portrait) portraitSize = size;
+            else landscapeSize = size;
+        }
+
+        function resizeDialog(finished) {
+            if (resizing || updatingList) return;
+            resizing = true;
+            try {
+                var minimum = portrait ? portraitMinimum : [1202, 256];
+                if (dialog.size.width < minimum[0] || dialog.size.height < minimum[1]) {
+                    dialog.size = [Math.max(minimum[0], dialog.size.width), Math.max(minimum[1], dialog.size.height)];
+                }
+                // 列幅は作成時にしか設定できないため、幅の変更が終わった時だけ一覧を作り直す。
+                if (finished && dialog.size.width - 24 !== builtBodyWidth) {
+                    var selected = selectedResult();
+                    buildBody(selected ? selected.linkId : null);
+                } else {
+                    layoutControls();
+                }
+                rememberSize();
+            } finally {
+                resizing = false;
+            }
+        }
+
+        function applyMode(selectedId) {
+            resizing = true;
+            try {
+                dialog.minimumSize = [0, 0];
+                dialog.maximumSize = [10000, 10000];
+                dialog.minimumSize = portrait ? portraitMinimum : [1202, 256];
+                var size = portrait ? portraitSize : landscapeSize;
+                dialog.preferredSize = size;
+                dialog.size = size;
+                toggle.text = portrait ? "横型" : "縦型";
+                toggle.helpTip = portrait ? "横型に切り替え" : "縦型に切り替え";
+                buildBody(selectedId);
+            } finally {
+                resizing = false;
+            }
+        }
+
+        // 自動レイアウトによるサイズの巻き戻りを避け、内容をウインドウの現在サイズに合わせる。
+        dialog.layout = {layout: layoutControls, resize: layoutControls};
+        dialog.onResizing = function () { resizeDialog(false); };
+        dialog.onResize = function () { resizeDialog(true); };
+        toggle.onClick = function () {
+            var selected = selectedResult();
+            rememberSize();
+            portrait = !portrait;
+            applyMode(selected ? selected.linkId : null);
+            if (dialog.visible) dialog.center();
+            input.active = true;
         };
-
-        var buttons = dialog.add("group");
-        buttons.alignment = ["right", "top"];
-        var close = buttons.add("button", undefined, "閉じる", {name: "cancel"});
-        dialog.cancelElement = close;
-        dialog.defaultElement = null;
-        close.onClick = function () { dialog.close(0); };
-
-        // 入力欄の内容・フォーカスには触れず、IMEの変換操作は入力欄に任せる。
         input.onChanging = updateResults;
         input.onChange = updateResults;
         method.onChange = updateResults;
         dialog.onShow = function () { input.active = true; };
+        applyMode(null);
         updateResults();
         return dialog;
     }
