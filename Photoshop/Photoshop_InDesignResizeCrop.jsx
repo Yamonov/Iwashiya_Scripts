@@ -8,7 +8,7 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_InDesign_Resize
-Version=2.7
+Version=2.8
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=InDesign配置に合わせてリサイズ・トリミング
 Author=Murakami Yoshiteru
@@ -1144,173 +1144,172 @@ function finalizeInDesignResizeFlow(ctx) {
 
 function toNFCJa(s) {
     if (!s) return s;
-    var map = {
-        // ===== Japanese: dakuten / handakuten =====
-        "カ\u3099": "ガ",
-        "キ\u3099": "ギ",
-        "ク\u3099": "グ",
-        "ケ\u3099": "ゲ",
-        "コ\u3099": "ゴ",
-        "サ\u3099": "ザ",
-        "シ\u3099": "ジ",
-        "ス\u3099": "ズ",
-        "セ\u3099": "ゼ",
-        "ソ\u3099": "ゾ",
-        "タ\u3099": "ダ",
-        "チ\u3099": "ヂ",
-        "ツ\u3099": "ヅ",
-        "テ\u3099": "デ",
-        "ト\u3099": "ド",
-        "ハ\u3099": "バ",
-        "ヒ\u3099": "ビ",
-        "フ\u3099": "ブ",
-        "ヘ\u3099": "ベ",
-        "ホ\u3099": "ボ",
-        "ウ\u3099": "ヴ",
-        "ワ\u3099": "ヷ",
-        "ヰ\u3099": "ヸ",
-        "ヱ\u3099": "ヹ",
-        "ヲ\u3099": "ヺ",
-        "ハ\u309A": "パ",
-        "ヒ\u309A": "ピ",
-        "フ\u309A": "プ",
-        "ヘ\u309A": "ペ",
-        "ホ\u309A": "ポ",
-        "か\u3099": "が",
-        "き\u3099": "ぎ",
-        "く\u3099": "ぐ",
-        "け\u3099": "げ",
-        "こ\u3099": "ご",
-        "さ\u3099": "ざ",
-        "し\u3099": "じ",
-        "す\u3099": "ず",
-        "せ\u3099": "ぜ",
-        "そ\u3099": "ぞ",
-        "た\u3099": "だ",
-        "ち\u3099": "ぢ",
-        "つ\u3099": "づ",
-        "て\u3099": "で",
-        "と\u3099": "ど",
-        "は\u3099": "ば",
-        "ひ\u3099": "び",
-        "ふ\u3099": "ぶ",
-        "へ\u3099": "べ",
-        "ほ\u3099": "ぼ",
-        "う\u3099": "ゔ",
-        "は\u309A": "ぱ",
-        "ひ\u309A": "ぴ",
-        "ふ\u309A": "ぷ",
-        "へ\u309A": "ぺ",
-        "ほ\u309A": "ぽ",
-
-        // ===== Latin: acute U+0301 =====
-        "A\u0301": "Á",
-        "E\u0301": "É",
-        "I\u0301": "Í",
-        "O\u0301": "Ó",
-        "U\u0301": "Ú",
-        "Y\u0301": "Ý",
-        "a\u0301": "á",
-        "e\u0301": "é",
-        "i\u0301": "í",
-        "o\u0301": "ó",
-        "u\u0301": "ú",
-        "y\u0301": "ý",
-        // grave U+0300
-        "A\u0300": "À",
-        "E\u0300": "È",
-        "I\u0300": "Ì",
-        "O\u0300": "Ò",
-        "U\u0300": "Ù",
-        "a\u0300": "à",
-        "e\u0300": "è",
-        "i\u0300": "ì",
-        "o\u0300": "ò",
-        "u\u0300": "ù",
-        // circumflex U+0302
-        "A\u0302": "Â",
-        "E\u0302": "Ê",
-        "I\u0302": "Î",
-        "O\u0302": "Ô",
-        "U\u0302": "Û",
-        "a\u0302": "â",
-        "e\u0302": "ê",
-        "i\u0302": "î",
-        "o\u0302": "ô",
-        "u\u0302": "û",
-        // diaeresis U+0308 (umlaut – e.g., ü)
-        "A\u0308": "Ä",
-        "E\u0308": "Ë",
-        "I\u0308": "Ï",
-        "O\u0308": "Ö",
-        "U\u0308": "Ü",
-        "Y\u0308": "Ÿ",
-        "a\u0308": "ä",
-        "e\u0308": "ë",
-        "i\u0308": "ï",
-        "o\u0308": "ö",
-        "u\u0308": "ü",
-        "y\u0308": "ÿ",
-        // tilde U+0303
-        "A\u0303": "Ã",
-        "N\u0303": "Ñ",
-        "O\u0303": "Õ",
-        "a\u0303": "ã",
-        "n\u0303": "ñ",
-        "o\u0303": "õ",
-        // ring above U+030A (e.g., å)
-        "A\u030A": "Å",
-        "a\u030A": "å",
-        // macron U+0304 (āēīōū)
-        "A\u0304": "Ā",
-        "E\u0304": "Ē",
-        "I\u0304": "Ī",
-        "O\u0304": "Ō",
-        "U\u0304": "Ū",
-        "a\u0304": "ā",
-        "e\u0304": "ē",
-        "i\u0304": "ī",
-        "o\u0304": "ō",
-        "u\u0304": "ū",
-        // caron U+030C (čšžřň etc.)
-        "C\u030C": "Č",
-        "D\u030C": "Ď",
-        "E\u030C": "Ě",
-        "N\u030C": "Ň",
-        "R\u030C": "Ř",
-        "S\u030C": "Š",
-        "T\u030C": "Ť",
-        "Z\u030C": "Ž",
-        "c\u030C": "č",
-        "d\u030C": "ď",
-        "e\u030C": "ě",
-        "n\u030C": "ň",
-        "r\u030C": "ř",
-        "s\u030C": "š",
-        "t\u030C": "ť",
-        "z\u030C": "ž",
-        // dot above U+0307 (ż)
-        "Z\u0307": "Ż",
-        "z\u0307": "ż",
-        // ogonek U+0328 (ą ę)
-        "A\u0328": "Ą",
-        "E\u0328": "Ę",
-        "a\u0328": "ą",
-        "e\u0328": "ę",
-        // cedilla U+0327 (ç)
-        "C\u0327": "Ç",
-        "c\u0327": "ç"
-    };
     var out = String(s);
-    for (var k in map) {
-        out = out.split(k).join(map[k]);
+    var needsComposition = false;
+    for (var charIndex = 0; charIndex < out.length; charIndex++) {
+        var code = out.charCodeAt(charIndex);
+        if ((code >= 0x0300 && code <= 0x036F) || code === 0x3099 || code === 0x309A) {
+            needsComposition = true;
+            break;
+        }
+    }
+    if (!needsComposition) return out;
+    // 既存の合成表を文字コードで保持し、BridgeTalk経由でも同じ文字列に一致させる。
+    var combinations = [
+        [0x30AB, 0x3099, 0x30AC],
+        [0x30AD, 0x3099, 0x30AE],
+        [0x30AF, 0x3099, 0x30B0],
+        [0x30B1, 0x3099, 0x30B2],
+        [0x30B3, 0x3099, 0x30B4],
+        [0x30B5, 0x3099, 0x30B6],
+        [0x30B7, 0x3099, 0x30B8],
+        [0x30B9, 0x3099, 0x30BA],
+        [0x30BB, 0x3099, 0x30BC],
+        [0x30BD, 0x3099, 0x30BE],
+        [0x30BF, 0x3099, 0x30C0],
+        [0x30C1, 0x3099, 0x30C2],
+        [0x30C4, 0x3099, 0x30C5],
+        [0x30C6, 0x3099, 0x30C7],
+        [0x30C8, 0x3099, 0x30C9],
+        [0x30CF, 0x3099, 0x30D0],
+        [0x30D2, 0x3099, 0x30D3],
+        [0x30D5, 0x3099, 0x30D6],
+        [0x30D8, 0x3099, 0x30D9],
+        [0x30DB, 0x3099, 0x30DC],
+        [0x30A6, 0x3099, 0x30F4],
+        [0x30EF, 0x3099, 0x30F7],
+        [0x30F0, 0x3099, 0x30F8],
+        [0x30F1, 0x3099, 0x30F9],
+        [0x30F2, 0x3099, 0x30FA],
+        [0x30CF, 0x309A, 0x30D1],
+        [0x30D2, 0x309A, 0x30D4],
+        [0x30D5, 0x309A, 0x30D7],
+        [0x30D8, 0x309A, 0x30DA],
+        [0x30DB, 0x309A, 0x30DD],
+        [0x304B, 0x3099, 0x304C],
+        [0x304D, 0x3099, 0x304E],
+        [0x304F, 0x3099, 0x3050],
+        [0x3051, 0x3099, 0x3052],
+        [0x3053, 0x3099, 0x3054],
+        [0x3055, 0x3099, 0x3056],
+        [0x3057, 0x3099, 0x3058],
+        [0x3059, 0x3099, 0x305A],
+        [0x305B, 0x3099, 0x305C],
+        [0x305D, 0x3099, 0x305E],
+        [0x305F, 0x3099, 0x3060],
+        [0x3061, 0x3099, 0x3062],
+        [0x3064, 0x3099, 0x3065],
+        [0x3066, 0x3099, 0x3067],
+        [0x3068, 0x3099, 0x3069],
+        [0x306F, 0x3099, 0x3070],
+        [0x3072, 0x3099, 0x3073],
+        [0x3075, 0x3099, 0x3076],
+        [0x3078, 0x3099, 0x3079],
+        [0x307B, 0x3099, 0x307C],
+        [0x3046, 0x3099, 0x3094],
+        [0x306F, 0x309A, 0x3071],
+        [0x3072, 0x309A, 0x3074],
+        [0x3075, 0x309A, 0x3077],
+        [0x3078, 0x309A, 0x307A],
+        [0x307B, 0x309A, 0x307D],
+        [0x0041, 0x0301, 0x00C1],
+        [0x0045, 0x0301, 0x00C9],
+        [0x0049, 0x0301, 0x00CD],
+        [0x004F, 0x0301, 0x00D3],
+        [0x0055, 0x0301, 0x00DA],
+        [0x0059, 0x0301, 0x00DD],
+        [0x0061, 0x0301, 0x00E1],
+        [0x0065, 0x0301, 0x00E9],
+        [0x0069, 0x0301, 0x00ED],
+        [0x006F, 0x0301, 0x00F3],
+        [0x0075, 0x0301, 0x00FA],
+        [0x0079, 0x0301, 0x00FD],
+        [0x0041, 0x0300, 0x00C0],
+        [0x0045, 0x0300, 0x00C8],
+        [0x0049, 0x0300, 0x00CC],
+        [0x004F, 0x0300, 0x00D2],
+        [0x0055, 0x0300, 0x00D9],
+        [0x0061, 0x0300, 0x00E0],
+        [0x0065, 0x0300, 0x00E8],
+        [0x0069, 0x0300, 0x00EC],
+        [0x006F, 0x0300, 0x00F2],
+        [0x0075, 0x0300, 0x00F9],
+        [0x0041, 0x0302, 0x00C2],
+        [0x0045, 0x0302, 0x00CA],
+        [0x0049, 0x0302, 0x00CE],
+        [0x004F, 0x0302, 0x00D4],
+        [0x0055, 0x0302, 0x00DB],
+        [0x0061, 0x0302, 0x00E2],
+        [0x0065, 0x0302, 0x00EA],
+        [0x0069, 0x0302, 0x00EE],
+        [0x006F, 0x0302, 0x00F4],
+        [0x0075, 0x0302, 0x00FB],
+        [0x0041, 0x0308, 0x00C4],
+        [0x0045, 0x0308, 0x00CB],
+        [0x0049, 0x0308, 0x00CF],
+        [0x004F, 0x0308, 0x00D6],
+        [0x0055, 0x0308, 0x00DC],
+        [0x0059, 0x0308, 0x0178],
+        [0x0061, 0x0308, 0x00E4],
+        [0x0065, 0x0308, 0x00EB],
+        [0x0069, 0x0308, 0x00EF],
+        [0x006F, 0x0308, 0x00F6],
+        [0x0075, 0x0308, 0x00FC],
+        [0x0079, 0x0308, 0x00FF],
+        [0x0041, 0x0303, 0x00C3],
+        [0x004E, 0x0303, 0x00D1],
+        [0x004F, 0x0303, 0x00D5],
+        [0x0061, 0x0303, 0x00E3],
+        [0x006E, 0x0303, 0x00F1],
+        [0x006F, 0x0303, 0x00F5],
+        [0x0041, 0x030A, 0x00C5],
+        [0x0061, 0x030A, 0x00E5],
+        [0x0041, 0x0304, 0x0100],
+        [0x0045, 0x0304, 0x0112],
+        [0x0049, 0x0304, 0x012A],
+        [0x004F, 0x0304, 0x014C],
+        [0x0055, 0x0304, 0x016A],
+        [0x0061, 0x0304, 0x0101],
+        [0x0065, 0x0304, 0x0113],
+        [0x0069, 0x0304, 0x012B],
+        [0x006F, 0x0304, 0x014D],
+        [0x0075, 0x0304, 0x016B],
+        [0x0043, 0x030C, 0x010C],
+        [0x0044, 0x030C, 0x010E],
+        [0x0045, 0x030C, 0x011A],
+        [0x004E, 0x030C, 0x0147],
+        [0x0052, 0x030C, 0x0158],
+        [0x0053, 0x030C, 0x0160],
+        [0x0054, 0x030C, 0x0164],
+        [0x005A, 0x030C, 0x017D],
+        [0x0063, 0x030C, 0x010D],
+        [0x0064, 0x030C, 0x010F],
+        [0x0065, 0x030C, 0x011B],
+        [0x006E, 0x030C, 0x0148],
+        [0x0072, 0x030C, 0x0159],
+        [0x0073, 0x030C, 0x0161],
+        [0x0074, 0x030C, 0x0165],
+        [0x007A, 0x030C, 0x017E],
+        [0x005A, 0x0307, 0x017B],
+        [0x007A, 0x0307, 0x017C],
+        [0x0041, 0x0328, 0x0104],
+        [0x0045, 0x0328, 0x0118],
+        [0x0061, 0x0328, 0x0105],
+        [0x0065, 0x0328, 0x0119],
+        [0x0043, 0x0327, 0x00C7],
+        [0x0063, 0x0327, 0x00E7]
+    ];
+    for (var i = 0; i < combinations.length; i++) {
+        var pair = combinations[i];
+        out = out.split(String.fromCharCode(pair[0], pair[1])).join(String.fromCharCode(pair[2]));
     }
     return out;
 }
 // 上の正規化関数をBridgeTalk本文に埋め込むためのソース文字列
 var NFC_HELPER_SRC = toNFCJa.toString();
-// パス正規化: toNFCJa + File.resolve + fsName を統一的に適用する関数
+// パス正規化: エイリアスを解決し、macOSではNFD/NFC表記を揃える。
 function _normPathLocal(p) {
+    var isWindows = $.os.indexOf("Windows") >= 0;
     try {
         var f = new File(p);
         try {
@@ -1318,10 +1317,11 @@ function _normPathLocal(p) {
             if (resolvedFile) f = resolvedFile;
         } catch (_e) { };
         var s = f.fsName;
-        return toNFCJa(s);
+        // WindowsではNFDとNFCの名前を持つ別ファイルを区別する。
+        return isWindows ? s : toNFCJa(s);
     } catch (e) {
         try {
-            return toNFCJa(String(p));
+            return isWindows ? String(p) : toNFCJa(String(p));
         } catch (e2) {
             return String(p);
         }
@@ -1664,7 +1664,7 @@ function main() {
 // InDesign側で使用する共通関数: パスのデコードと正規化
 function _decodeAndNormalizePath(encodedPath) {
     var decoded = decodeURIComponent(encodedPath);
-    decoded = toNFCJa(decoded);
+    if ($.os.indexOf("Windows") < 0) decoded = toNFCJa(decoded);
     try {
         decoded = _normPath(decoded);
     } catch (_e) { }
@@ -1675,7 +1675,7 @@ var DECODE_NORM_HELPER_SRC = _decodeAndNormalizePath.toString();
 // InDesign側で使用する共通関数: パスのデコード（正規化なし）
 function _decodePathRaw(encodedPath) {
     var decoded = decodeURIComponent(encodedPath);
-    return toNFCJa(decoded);
+    return $.os.indexOf("Windows") >= 0 ? decoded : toNFCJa(decoded);
 }
 var DECODE_RAW_HELPER_SRC = _decodePathRaw.toString();
 
@@ -1684,7 +1684,7 @@ function inDesignSide(targetInfo) {
     /*__INJECT_HELPERS__*/
     var isWindows = $.os.indexOf("Windows") >= 0;
     var encodedPath = targetInfo && targetInfo.pathFs ? String(targetInfo.pathFs) : "";
-    var decodedRaw = _decodePathRaw(encodedPath); // 生文字列（NFCのみ）
+    var decodedRaw = _decodePathRaw(encodedPath); // Windowsは元の表記、macOSはNFC
     var decodedNorm = _decodeAndNormalizePath(encodedPath); // 正規化済み
     if (app.documents.length === 0) return null;
 
@@ -1736,7 +1736,7 @@ function inDesignSide(targetInfo) {
     }
 
     function splitFileNameInfo(fileName) {
-        var normalizedFileName = decodeUriSafe(fileName);
+        var normalizedFileName = toNFCJa(decodeUriSafe(fileName));
         normalizedFileName = String(normalizedFileName || "");
         if (containsPathSeparator(normalizedFileName)) {
             normalizedFileName = splitPathInfo(normalizedFileName).fileName;
