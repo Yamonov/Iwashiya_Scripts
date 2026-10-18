@@ -7,7 +7,7 @@ Script-ID=org.iwashi.Photoshop_Illustrator_Resize
 Version=2.2
 
 Script-ID=org.iwashi.Photoshop_InDesign_Resize
-Version=2.2
+Version=2.7
 
 Script-ID=org.iwashi.Photoshop_ChangeMaskColor
 Version=1

@@ -8,11 +8,11 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_InDesign_Resize
-Version=2.2
+Version=2.7
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=InDesign配置に合わせてリサイズ・トリミング
 Author=Murakami Yoshiteru
-Release-Date=2026-08-12
+Release-Date=2026-10-19
 Target-App=Photoshop
 Description-BEGIN
 Photoshopで開いている画像を、InDesignドキュメント上の配置サイズに合わせてリサイズします。
@@ -1688,15 +1688,21 @@ function inDesignSide(targetInfo) {
     var decodedNorm = _decodeAndNormalizePath(encodedPath); // 正規化済み
     if (app.documents.length === 0) return null;
 
-    var PATH_SEPARATOR_PATTERN = new RegExp("[/\\\\\\u00A5\\uFFE5\\uFF3C]");
-    var PATH_SEPARATOR_REPEAT_PATTERN = new RegExp("[/\\\\\\u00A5\\uFFE5\\uFF3C]+", "g");
+    // BridgeTalkの受信側では文字列のエスケープが変化するため、文字コードで判定する。
+    function isPathSeparatorCode(code) {
+        return code === 47 || code === 92 || code === 0x00A5 || code === 0xFFE5 || code === 0xFF3C;
+    }
 
     function normalizePathSeparatorsForSplit(pathText) {
-        return String(pathText || "").replace(PATH_SEPARATOR_REPEAT_PATTERN, "\\");
+        return normalizeDisplaySlashesLocal(pathText, "/");
     }
 
     function containsPathSeparator(text) {
-        return PATH_SEPARATOR_PATTERN.test(String(text || ""));
+        var value = String(text || "");
+        for (var i = 0; i < value.length; i++) {
+            if (isPathSeparatorCode(value.charCodeAt(i))) return true;
+        }
+        return false;
     }
 
     function decodeUriSafe(text) {
@@ -1709,7 +1715,7 @@ function inDesignSide(targetInfo) {
 
     function splitPathInfo(filePath) {
         var normalizedPath = normalizePathSeparatorsForSplit(filePath);
-        var slashIndex = normalizedPath.lastIndexOf("\\");
+        var slashIndex = normalizedPath.lastIndexOf("/");
         var folderPath = (slashIndex >= 0) ? normalizedPath.substring(0, slashIndex) : "";
         var fileName = (slashIndex >= 0) ? normalizedPath.substring(slashIndex + 1) : normalizedPath;
         var dotIndex = fileName.lastIndexOf(".");
@@ -1779,7 +1785,7 @@ function inDesignSide(targetInfo) {
         var slashChar = separator || "/";
         for (var i = 0; i < value.length; i++) {
             var ch = value.charAt(i);
-            var isSeparator = (ch === "/") || (ch === "\\") || (ch === "¥") || (ch === "￥") || (ch === "＼");
+            var isSeparator = isPathSeparatorCode(value.charCodeAt(i));
             if (isSeparator) {
                 if (!lastWasSeparator) {
                     normalized += slashChar;
