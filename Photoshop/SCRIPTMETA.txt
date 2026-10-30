@@ -81,4 +81,7 @@ Version=1
 Script-ID=org.iwashi.IncrementSelectedLayerNumber
 Version=1
 
+Script-ID=org.iwashi.photoshop.opencurrentdocumentinbridge
+Version=0.1
+
 SCRIPTMETA-DIST-END
