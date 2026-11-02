@@ -8,11 +8,11 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_Illustrator_Resize
-Version=2.3
+Version=2.3.5
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=Illustrator配置に合わせてリサイズ・トリミング
 Author=Murakami Yoshiteru
-Release-Date=2026-10-19
+Release-Date=2026-11-02
 Target-App=Photoshop
 Description-BEGIN
 Photoshopで開いている画像を、Illustratorドキュメント上の配置サイズに合わせてリサイズします。
@@ -126,10 +126,12 @@ var K_RADIO_INDEX_ID = stringIDToTypeID("radioIndex"); // targetPPIList のイ�
 var K_UPSCALE_ID = stringIDToTypeID("upscaleMethod"); // methodValues の文字列
 var K_DOWNSCALE_ID = stringIDToTypeID("downMethod"); // downMethodValues の文字列
 var K_USE_PREV_ID = stringIDToTypeID("usePrevSettings"); // 前回設定値を使用（bool）
-var SCHEMA_VERSION_ID = 1;
+var K_CUSTOM_PPI_ID = stringIDToTypeID("customPPI");
+var SCHEMA_VERSION_ID = 2;
 
 var defaultsPrefsID = {
     usePrev: false,
+    customPPI: 350,
     radioIndex: 0, // PPI リスト先頭
     upscaleMethod: "deepUpscale", // 既定アップスケール
     downMethod: "bicubic" // 既定ダウンスケール
@@ -456,6 +458,7 @@ function cloneDefaultPrefs() {
     return {
         usePrev: defaultsPrefsID.usePrev,
         radioIndex: defaultsPrefsID.radioIndex,
+        customPPI: defaultsPrefsID.customPPI,
         upscaleMethod: defaultsPrefsID.upscaleMethod,
         downMethod: defaultsPrefsID.downMethod
     };
@@ -468,7 +471,11 @@ function loadPrefs() {
         if (d.hasKey(K_USE_PREV_ID)) p.usePrev = d.getBoolean(K_USE_PREV_ID);
         if (d.hasKey(K_RADIO_INDEX_ID)) {
             var idx = d.getInteger(K_RADIO_INDEX_ID);
-            if (idx >= 0 && idx < targetPPIList.length) p.radioIndex = idx;
+            if (idx >= 0 && idx <= targetPPIList.length) p.radioIndex = idx;
+        }
+        if (d.hasKey(K_CUSTOM_PPI_ID)) {
+            var customPPI = d.getDouble(K_CUSTOM_PPI_ID);
+            if (isFinite(customPPI) && customPPI > 0) p.customPPI = customPPI;
         }
         if (d.hasKey(K_UPSCALE_ID)) p.upscaleMethod = d.getString(K_UPSCALE_ID);
         if (d.hasKey(K_DOWNSCALE_ID)) p.downMethod = d.getString(K_DOWNSCALE_ID);
@@ -482,7 +489,8 @@ function savePrefs(p) {
     var d = new ActionDescriptor();
     d.putInteger(K_VER_ID, SCHEMA_VERSION_ID);
     d.putBoolean(K_USE_PREV_ID, !!p.usePrev);
-    d.putInteger(K_RADIO_INDEX_ID, Math.max(0, Math.min(targetPPIList.length - 1, p.radioIndex)));
+    d.putInteger(K_RADIO_INDEX_ID, Math.max(0, Math.min(targetPPIList.length, p.radioIndex)));
+    d.putDouble(K_CUSTOM_PPI_ID, isFinite(p.customPPI) && p.customPPI > 0 ? p.customPPI : defaultsPrefsID.customPPI);
     d.putString(K_UPSCALE_ID, String(p.upscaleMethod));
     d.putString(K_DOWNSCALE_ID, String(p.downMethod));
     app.putCustomOptions(PREF_ID_ILLUSTRATOR_RESIZE, d, true);
@@ -494,6 +502,7 @@ function saveUsePrevOnly(flag) {
     savePrefs({
         usePrev: !!flag,
         radioIndex: cur.radioIndex,
+        customPPI: cur.customPPI,
         upscaleMethod: cur.upscaleMethod,
         downMethod: cur.downMethod
     });
@@ -3307,11 +3316,12 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
     ];
     var initialState = {
         radioIndex: 0,
+        customPPI: prefs.customPPI,
         upscaleMethod: "deepUpscale",
         downMethod: "bicubic"
     };
     if (prefs.usePrev) {
-        initialState.radioIndex = (prefs.radioIndex >= 0 && prefs.radioIndex < targetPPIList.length) ? prefs.radioIndex : 0;
+        initialState.radioIndex = (prefs.radioIndex >= 0 && prefs.radioIndex <= targetPPIList.length) ? prefs.radioIndex : 0;
         initialState.upscaleMethod = prefs.upscaleMethod || initialState.upscaleMethod;
         initialState.downMethod = prefs.downMethod || initialState.downMethod;
     }
@@ -3506,7 +3516,7 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
 
         function buildPrevSettingsLine() {
             var ppiIndex = (currentPrefs.radioIndex >= 0 && currentPrefs.radioIndex < targetPPIList.length) ? currentPrefs.radioIndex : 0;
-            var ppiText = String(targetPPIList[ppiIndex]);
+            var ppiText = String(currentPrefs.radioIndex === targetPPIList.length ? currentPrefs.customPPI : targetPPIList[ppiIndex]);
             var upText = pickLabelByValue(currentPrefs.upscaleMethod, methodValues, methodLabels, methodLabels[0]);
             var downText = pickLabelByValue(currentPrefs.downMethod, downMethodValues, downMethodLabels, downMethodLabels[0]);
             return ppiText + localText(" ppi / 拡大：", " ppi / Upscale: ") + upText + localText(" / 縮小：", " / Downscale: ") + downText;
@@ -3580,7 +3590,8 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
         if (radioIndex < 0) radioIndex = 0;
         return {
             radioIndex: radioIndex,
-            ppi: targetPPIList[radioIndex],
+            customPPI: Number(ui.resolution.input.text),
+            ppi: radioIndex === targetPPIList.length ? Number(ui.resolution.input.text) : targetPPIList[radioIndex],
             method: getSelectedRadioValue(ui.upscale, "deepUpscale"),
             downMethod: getSelectedRadioValue(ui.downscale, "bicubic"),
             trimmingMode: getSelectedRadioValue(ui.trimming, TRIMMING_MODE_NONE)
@@ -3590,6 +3601,7 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
     function applySelectionState(ui, state, skipRedraw) {
         var validIndex = (state.radioIndex >= 0 && state.radioIndex < ui.resolution.buttons.length) ? state.radioIndex : 0;
         selectRadioIndex(ui.resolution.buttons, validIndex);
+        ui.resolution.input.text = String(state.customPPI);
         selectRadioIndex(ui.upscale.buttons, findValueIndex(ui.upscale.values, state.upscaleMethod));
         selectRadioIndex(ui.downscale.buttons, findValueIndex(ui.downscale.values, state.downMethod));
         renderDialogState(skipRedraw === true);
@@ -3608,6 +3620,10 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
                 buttons[buttonIndex].enabled = isEnabled;
             }
         }
+    }
+
+    function updateCustomPPIEnabled() {
+        ui.resolution.input.enabled = ui.resolution.panel.enabled && ui.resolution.buttons[targetPPIList.length].value;
     }
 
     function computeDialogState(selectionState, historyWarning) {
@@ -3680,7 +3696,16 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
     }
 
     function renderDialogState(skipRedraw) {
-        var computed = computeDialogState(collectSelectionState(ui), historyWarning);
+        updateCustomPPIEnabled();
+        var selection = collectSelectionState(ui);
+        var valid = isFinite(selection.ppi) && selection.ppi > 0;
+        buttonRow.okButton.enabled = valid;
+        if (!valid) {
+            ui.scaleText.text = localText("指定解像度に0より大きい数値を入力してください。", "Enter a target resolution greater than zero.");
+            renderWarningRows(ui.warningRows, createWarningBag(), skipRedraw === true, dlg);
+            return;
+        }
+        var computed = computeDialogState(selection, historyWarning);
         ui.scaleText.text = computed.scaleText;
         if (ui.info && ui.info.extraText) {
             var postResizeRangeText = "-";
@@ -3702,6 +3727,19 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
     ui.info = buildInfoPanel(dlg, messageBase);
 
     ui.resolution = buildRadioPanel(dlg, localText("指定解像度", "Target Resolution"), resolutionLabels, initialState.radioIndex);
+    ui.resolution.buttons.push(ui.resolution.panel.add("radiobutton", undefined, ""));
+    ui.resolution.input = ui.resolution.panel.add("edittext", undefined, String(initialState.customPPI));
+    ui.resolution.input.characters = 7;
+    ui.resolution.panel.add("statictext", undefined, " ppi");
+    selectRadioIndex(ui.resolution.buttons, initialState.radioIndex);
+    // 入力中の全体再描画は編集フォーカスを妨げるため、確定時に表示を更新する。
+    ui.resolution.input.onChanging = function () {
+        var selection = collectSelectionState(ui);
+        buttonRow.okButton.enabled = isFinite(selection.ppi) && selection.ppi > 0;
+    };
+    ui.resolution.input.onChange = function () {
+        renderDialogState();
+    };
     ui.upscale = buildRadioPanel(dlg, localText("拡大メソッド", "Upscale Method"), methodLabels, findValueIndex(methodValues, initialState.upscaleMethod));
     ui.downscale = buildRadioPanel(dlg, localText("縮小メソッド", "Downscale Method"), downMethodLabels, findValueIndex(downMethodValues, initialState.downMethod));
     ui.upscale.values = methodValues;
@@ -3734,6 +3772,7 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
     usePrevArea.checkbox.onClick = function () {
         if (usePrevArea.checkbox.value) applySelectionState(ui, prefs);
         setControlsEnabled(ui, !usePrevArea.checkbox.value);
+        updateCustomPPIEnabled();
         usePrevArea.updateInfoLine();
     };
     setControlsEnabled(ui, !usePrevArea.checkbox.value);
@@ -3747,6 +3786,8 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
     }
 
     buttonRow.okButton.onClick = function () {
+        var selection = collectSelectionState(ui);
+        if (!isFinite(selection.ppi) || selection.ppi <= 0) return;
         closeDialog(1);
     };
     buttonRow.cancelButton.onClick = function () {
@@ -3790,6 +3831,7 @@ function showConfirmDialog(doc, messageBase, placedWmm, placedHmm, docWidthPx, d
             savePrefs({
                 usePrev: usePrev,
                 radioIndex: selectedState.radioIndex,
+                customPPI: isFinite(selectedState.customPPI) && selectedState.customPPI > 0 ? selectedState.customPPI : prefs.customPPI,
                 upscaleMethod: selectedState.method,
                 downMethod: selectedState.downMethod
             });
