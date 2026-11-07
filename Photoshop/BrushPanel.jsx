@@ -4,9 +4,12 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.toggleBrushesPalette
+Meta-Default-language=ja
 Version=1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=ブラシパネル表示・非表示
+Name[en]=Toggle the Brushes Panel
+Tags=パネル,panel,ブラシ,brush
 Author=Murakami Yoshiteru
 Target-App=Photoshop
 Edit-Password-SHA256=OimhoL9gM4ocNsFN:ffca0de550cc5bb1001f8f4b9ba34bec4c54ac8216baaa55a96259a91cc92446

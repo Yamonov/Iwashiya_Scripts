@@ -1,11 +1,16 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_OpacityFlowExposure
+Meta-Default-language=ja
+Name=不透明度・流量・露光量を変更
+Name[en]=Adjust Opacity, Flow, and Exposure
+Tags=ブラシ,brush,不透明度,opacity,流量,flow,露光量,exposure
 Version=1
 Release-Date=2026-03-23
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Target-App=Photoshop
 Description-BEGIN
+[ja]
 ブラシの不透明度と流量を変更する、本体スクリプトです。
 
 $.evalFile(File(File($.fileName).parent + "/opacityFlowExposure.jsxinc")); r($.fileName);
@@ -17,6 +22,19 @@ F：flow（流量）、O：opacity（不透明度）
 例：
 OFE_F-.jsx　（Flowをいい感じに一段階下げます）
 OFE_O100.jsx　（Opacityを最大値に設定します）
+
+[en]
+This is the core script for changing brush opacity and flow.
+
+Create files named OFE_xxx.jsx containing the following line, place them in the same folder as this script, and run those files:
+
+$.evalFile(File(File($.fileName).parent + "/opacityFlowExposure.jsxinc")); r($.fileName);
+
+The xxx part of the filename determines the operation.
+Use F for flow or O for opacity, followed by a value from 0 to 100, or by - or +.
+Examples:
+OFE_F-.jsx lowers Flow by one preset step.
+OFE_O100.jsx sets Opacity to its maximum.
 Description-END
 SCRIPTMETA-END
 */

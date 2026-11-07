@@ -3,13 +3,22 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.PreserveGuideVisibilityInPreview
+Meta-Default-language=ja
 Version=1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=ガイド表示を維持してトリミング表示を切り替え
+Name[en]=Toggle Trim View and Preserve Guides
+Tags=ガイド,guides,表示,view
 Author=Murakami Yoshiteru
 Release-Date=2026-08-21
 Target-App=Illustrator
-Description=トリミング表示を切り替えます。通常表示でガイドが表示されていた場合は、トリミング表示へ切り替えたあともガイドを表示します。
+Description-BEGIN
+[ja]
+トリミング表示を切り替えます。通常表示でガイドが表示されていた場合は、トリミング表示へ切り替えたあともガイドを表示します。
+
+[en]
+Toggles Trim View. If guides were visible in the normal view, they remain visible after switching to Trim View.
+Description-END
 SCRIPTMETA-END
 */
 

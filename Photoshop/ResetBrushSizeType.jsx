@@ -3,13 +3,22 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_ResetBrushSizeType
+Meta-Default-language=ja
+Name=ブラシのプリセットとサイズをリセット
+Name[en]=Reset Brush Preset and Size
+Tags=ブラシ,brush,ズーム,zoom,プリセット,presets
 Version=1
 Release-Date=2026-03-23
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Target-App=Photoshop
 Description-BEGIN
+[ja]
 ブラシをブラシパネルの最初のプリセットにし、ブラシサイズをズームレベルに合わせてリセットします。大きすぎる・小さすぎるサイズからショートカットキーで一発で使いやすいサイズにします。
 初期設定の円形ブラシをブラシパネルの最初においてください。
+
+[en]
+Selects the first preset in the Brushes panel and resets the brush size to suit the current zoom level. Assign a keyboard shortcut to quickly change an excessively large or small brush to a practical size.
+Place a default round brush first in the Brushes panel.
 Description-END
 SCRIPTMETA-END
 

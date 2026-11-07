@@ -4,13 +4,22 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.FSComp_toggle
+Meta-Default-language=ja
 Version=1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=周波数分離カンプ表示トグル
+Name[en]=Cycle Frequency Separation Layer Comps
+Tags=周波数分離,frequency separation,レイヤーカンプ,layer comps
 Author=Murakami Yoshiteru
 Target-App=Photoshop
 Edit-Password-SHA256=debd6f5a695b46db:77f90c46448f5afe0569dd0a7850510c30a80e28d3d7b44fb2f7a48fb94896ad
-Description=実行する度に、FrequencySeparation_compで作成したレイヤーカンプを切り替えます。
+Description-BEGIN
+[ja]
+実行する度に、FrequencySeparation_compで作成したレイヤーカンプを切り替えます。
+
+[en]
+Cycles through the layer comps created by FrequencySeparation_comp each time the script runs.
+Description-END
 SCRIPTMETA-END
 
 */

@@ -4,11 +4,20 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.textframewidthchanger
+Meta-Default-language=ja
 Version=1
 Name=テキストフレーム幅を文字サイズの倍数に
+Name[en]=Set Frame Width in Font Size Multiples
+Tags=文字,text,レイアウト,layout
 Author=Murakami Yoshiteru
 Target-App=Illustrator
-Description=実行時とカーソル左右の操作で、テキストフレームの幅をフォントサイズの倍数に整えます。
+Description-BEGIN
+[ja]
+実行時とカーソル左右の操作で、テキストフレームの幅をフォントサイズの倍数に整えます。
+
+[en]
+Snaps the text frame width to a multiple of the font size when launched and when using the left and right arrow keys.
+Description-END
 SCRIPTMETA-END
 
 */

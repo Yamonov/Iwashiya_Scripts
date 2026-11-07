@@ -4,14 +4,21 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.AdjustmentLayerPanel
+Meta-Default-language=ja
 Version=1
 Release-Date=2026-07-06
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=調整レイヤー呼び出し
+Name[en]=Create Adjustment and Fill Layers
+Tags=調整レイヤー,adjustment layer,塗りつぶし,fill layer,パネル,panel
 Author=Murakami Yoshiteru
 Target-App=Photoshop
 Description-BEGIN
+[ja]
 アイコンボタンのパネルからPhotoshopの調整レイヤーと塗りつぶしレイヤーを作成します。
+
+[en]
+Creates Photoshop adjustment and fill layers from a panel of icon buttons.
 Description-END
 SCRIPTMETA-END
 

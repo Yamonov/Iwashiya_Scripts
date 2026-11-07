@@ -1,14 +1,24 @@
 (*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.BridgeOpen
+Meta-Default-language=ja
+Name=Finderの選択項目をBridgeで開く
+Name[en]=Open Finder Selection in Adobe Bridge
+Tags=ファイル,files,Bridge
 Version=1
 Release-Date=2026-03-23
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Finder
 Target-App=Finder
 Description-BEGIN
+[ja]
 Finderで選択しているファイルやフォルダをBridgeで開きます。
 Keyboard Maestroでショートカットキーで実行したり、スクリプトエディタでアプリ化してFinderツールバーに置いて実行するといい感じです。
 このスクリプト本体はこのままどこかに置いておき、アップデート通知を受け取れるようにしておいてください。
+
+[en]
+Opens files or folders selected in Finder in Adobe Bridge.
+You can run it with a Keyboard Maestro shortcut, or save it as an application in Script Editor and place it in the Finder toolbar.
+Keep the original script file saved separately so you can continue receiving update notifications.
 Description-END
 SCRIPTMETA-END
 

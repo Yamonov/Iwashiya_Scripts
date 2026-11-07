@@ -2,14 +2,23 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_ClippingViewDelete
+Meta-Default-language=ja
 Version=1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=クリッピング表示レイヤーグループを削除
+Name[en]=Remove the Clipping Preview Group
+Tags=クリッピング表示,clipping preview,レイヤー,layers,整理,cleanup
 Author=Murakami Yoshiteru
 Release-Date=2026-05-18
 Target-App=Photoshop
 Edit-Password-SHA256=XuQlCwV1t7x0Dxf6:27ff384138df6c038ba4cf81b26e35fffe3db5a94715ec922acce0882cc76f84
-Description=「クリッピング表示」で作成したレイヤーグループを、内部レイヤー構成を確認してから削除します。
+Description-BEGIN
+[ja]
+「クリッピング表示」で作成したレイヤーグループを、内部レイヤー構成を確認してから削除します。
+
+[en]
+Removes the layer group created by Clipping Preview after checking its internal layer structure.
+Description-END
 SCRIPTMETA-END
 
 

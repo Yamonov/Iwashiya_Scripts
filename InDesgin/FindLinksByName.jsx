@@ -1,12 +1,16 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.FindLinksByName
+Meta-Default-language=ja
 Version=1.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/InDesgin
 Name=リンクファイル名で検索
+Name[en]=Find Linked Files by Name
+Tags=リンク,links,検索,search
 Author=Murakami Yoshiteru
 Target-App=InDesign
 Description-BEGIN
+[ja]
 現在のドキュメントのリンクを、ファイル名で検索します。
 検索方法は「先頭一致」「部分一致」「拡張子のみ」「正規表現」から選択できます。英字の大文字と小文字は区別しません。
 起動時にリンク情報を取得し、一覧上部の入力欄に入力するたびに結果を絞り込みます。入力欄が空なら全件を表示します。
@@ -17,6 +21,18 @@ Description-BEGIN
 リンク状態は最左列に、リンク切れを「×」、正常を空欄、その他を「△」で表示します。
 正規表現が未完成または無効な間は、直前の結果を残してメッセージを表示します。
 結果を選択すると、そのページへ移動し、配置オブジェクトを中央に表示します。一覧は「閉じる」またはEscで閉じます。
+
+[en]
+Searches the current document's links by filename.
+Choose from prefix matching, substring matching, extension only, or regular expressions. Matching is case-insensitive.
+Loads link information at launch and filters the results as you type in the field above the list. An empty field shows all links.
+The standard vertical layout places the S, P, and Filename list beside the selected link's details. Filenames, parent folder paths, and drive names wrap to show their full text.
+The button to the right of the search field switches to a horizontal layout showing link status, page number, filename, path, effective ppi, format, color mode, and placement layer in the list.
+Switching layouts preserves the search criteria and selection. Long paths in the horizontal layout are shortened at the beginning.
+The window is resizable and remembers each layout's size while it remains open.
+The leftmost column shows link status: an x for missing links, a blank for normal links, and a triangle for other states.
+While a regular expression is incomplete or invalid, the previous results remain visible and a message is shown.
+Selecting a result navigates to its page and centers the placed object in the view. Close the list with Close or Esc.
 Description-END
 SCRIPTMETA-END
 */

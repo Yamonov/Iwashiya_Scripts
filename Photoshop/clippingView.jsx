@@ -2,17 +2,26 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_ClippingView
+Meta-Default-language=ja
 Version=1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=クリッピング表示レイヤーグループ作成
+Name[en]=Preview Highlight and Shadow Clipping
+Tags=クリッピング表示,clipping preview,レイヤー,layers,製版,prepress
 Author=Murakami Yoshiteru
 Release-Date=2026-03-23
 Target-App=Photoshop
 Edit-Password-SHA256=dd11a7f844bc4fc3:0ae4c79c57740cfe77e7dfd5dd59450bd38776a4ee7482f7abc02a031e490d74
 Description-BEGIN
+[ja]
 RGBドキュメントとCMYKドキュメントで実行すると、潰れるところを青、飛ぶところを赤で表示するレイヤーグループを最上部に作成します。
 もう一度実行すると非表示に、再度実行すると最上部に移動した上で表示状態になります。
 CMYKドキュメントでは総インキ量を指定できます。システム側にインストールされる「TotalInkPreview.icc」を使用します。
+
+[en]
+Creates a layer group at the top of an RGB or CMYK document that shows clipped shadows in blue and clipped highlights in red.
+Running it again hides the group. Running it once more moves the group to the top and shows it.
+For CMYK documents, you can specify the total ink coverage. Uses the TotalInkPreview.icc profile installed on the system.
 Description-END
 SCRIPTMETA-END
 

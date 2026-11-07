@@ -4,14 +4,21 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.LayerColorSelector
+Meta-Default-language=ja
 Version=1.1
 Release-Date=2026-06-24
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=レイヤーカラー選択
+Name[en]=Set Layer Color Labels
+Tags=レイヤー,layers,カラーラベル,color labels
 Author=Murakami Yoshiteru
 Target-App=Photoshop
 Description-BEGIN
+[ja]
 ScriptUIパネルで選択したレイヤーカラーを、選択中のレイヤーやレイヤーグループに適用します。
+
+[en]
+Applies the color label chosen in the ScriptUI panel to the selected layers or layer groups.
 Description-END
 SCRIPTMETA-END
 

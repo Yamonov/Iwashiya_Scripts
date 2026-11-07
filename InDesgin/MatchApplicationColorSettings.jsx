@@ -1,14 +1,22 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.MatchApplicationColorSettings
+Meta-Default-language=ja
 Version=1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/InDesgin
 Name=ドキュメントのカラー設定をアプリに合わせる
+Name[en]=Apply Application Color Settings to Document
+Tags=カラー,color,カラーマネジメント,color management
 Author=Murakami Yoshiteru
 Target-App=InDesign
 Description-BEGIN
+[ja]
 アクティブドキュメントのRGB・CMYKプロファイルとカラーマネジメントポリシーを、アプリケーションの現在のカラー設定に合わせます。
 変更後のプロファイル名とポリシーをアラートで表示します。
+
+[en]
+Sets the active document's RGB and CMYK profiles and color management policies to match the application's current color settings.
+Displays the resulting profile names and policies in an alert.
 Description-END
 SCRIPTMETA-END
 */

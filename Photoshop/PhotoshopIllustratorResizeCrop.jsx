@@ -8,13 +8,17 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_Illustrator_Resize
+Meta-Default-language=ja
 Version=2.3.5
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=Illustrator配置に合わせてリサイズ・トリミング
+Name[en]=Resize and Crop for Illustrator Placement
+Tags=リサイズ,resize,トリミング,crop,Illustrator,XMP
 Author=Murakami Yoshiteru
 Release-Date=2026-11-02
 Target-App=Photoshop
 Description-BEGIN
+[ja]
 Photoshopで開いている画像を、Illustratorドキュメント上の配置サイズに合わせてリサイズします。
 
 各Illustratorで対象ドキュメントをアクティブにしておき、Photoshopから実行してください。
@@ -25,6 +29,20 @@ Photoshopで開いている画像を、Illustratorドキュメント上の配置
 伸ばし処理後は、Illustrator側のスクリプトで処理してください。
 
 拡張子やパスの違う画像ファイルでも処理できますが、同一性の担保はご自身で行ってください。
+
+[en]
+Resizes the image open in Photoshop to match its placed size in an Illustrator document.
+
+Make the target document active in each running instance of Illustrator, then run this script from Photoshop.
+
+Choose from three trimming options:
+- Do not extend or trim.
+- Extend and add guides at the trim edges, without deleting image pixels.
+- Extend and crop to the trim area, deleting image content outside the clipping mask.
+Both the guide and crop options record the Illustrator clipping mask information in XMP metadata.
+After extending the image, run the companion script in Illustrator.
+
+Images with different file extensions or paths can also be processed, but you must verify that they correspond to the same image.
 Description-END
 SCRIPTMETA-END
 */

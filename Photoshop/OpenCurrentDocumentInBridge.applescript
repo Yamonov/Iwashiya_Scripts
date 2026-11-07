@@ -2,9 +2,12 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.photoshop.opencurrentdocumentinbridge
+Meta-Default-language=ja
 Version=0.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=Bridgeで参照
+Name[en]=Reveal Current Document in Adobe Bridge
+Tags=ファイル,files,Bridge
 Target-App=Photoshop
 SCRIPTMETA-END
 

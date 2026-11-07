@@ -4,9 +4,12 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.StarLayerToggle
+Meta-Default-language=ja
 Version=1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=★マークレイヤーを表示・非表示
+Name[en]=Toggle Visibility of Starred Layers
+Tags=レイヤー,layers,表示,view
 Target-App=Photoshop
 SCRIPTMETA-END
 

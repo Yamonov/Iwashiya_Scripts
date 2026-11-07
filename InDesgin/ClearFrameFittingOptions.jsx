@@ -2,14 +2,22 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=local.yamo.script_tgjzc681xeev
+Meta-Default-language=ja
 Version=1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/InDesgin
 Name=フレーム調整オプションを消去
+Name[en]=Disable Auto Fit for Image Frames
+Tags=フレーム,frames,レイアウト,layout
 Author=Murakami Yoshiteru
 Target-App=InDesign
 Description-BEGIN
+[ja]
 ドキュメント内の画像フレームの「自動調整」をオフにします。
 ページ上にあり、フレームとレイヤーが表示されているものを対象に、変更した件数をページごとに表示します。
+
+[en]
+Disables Auto Fit for image frames in the document.
+Processes frames on pages when both the frame and its layer are visible, and reports the number changed per page.
 Description-END
 SCRIPTMETA-END
 

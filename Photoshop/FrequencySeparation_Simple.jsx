@@ -4,14 +4,21 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.FrequencySeparationSimple
+Meta-Default-language=ja
 Version=1.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=テクスチャ分離シンプル
+Name[en]=Create Simple Frequency Separation Layers
+Tags=周波数分離,frequency separation,レタッチ,retouching,レイヤー,layers
 Author=Murakami Yoshiteru
 Target-App=Photoshop
 Edit-Password-SHA256=34d903dd737546ea:a9773e7d5ed8d07a29f368c9b00c99fc61047f9e859212de8041a54b2c6149c9
 Description-BEGIN
+[ja]
 シンプルな周波数分離レイヤーグループを作成します。
+
+[en]
+Creates a simple frequency separation layer group.
 Description-END
 SCRIPTMETA-END
 

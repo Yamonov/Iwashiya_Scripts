@@ -3,18 +3,29 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CurledLine
+Meta-Default-language=ja
 Version=1.0.0
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=くるっとした線
+Name[en]=Create a Loop from Three Anchors
+Tags=パス,path,描画,drawing
 Author=Murakami Yoshiteru
 Release-Date=2026-10-06
 Target-App=Illustrator
 Description-BEGIN
+[ja]
 3つのアンカーを持つ開いたパスを、途中で交差して輪を作る一本の線に変形します。
 アンカーを開始点・輪の中心・終了点の順に配置し、パスを1本選択して実行してください。
 
 輪の幅、線幅、巻く方向、巻きの角度、開始側と終了側の曲がり具合を調整できます。
 プレビューに対応し、キャンセルすると元のパスに戻ります。
+
+[en]
+Transforms an open path with three anchors into a single line that crosses itself to form a loop.
+Arrange the anchors as the start point, loop center, and end point, then select one path and run the script.
+
+You can adjust the loop width, stroke width, winding direction and angle, and the curvature at both ends.
+Supports preview; canceling restores the original path.
 Description-END
 SCRIPTMETA-END
 */

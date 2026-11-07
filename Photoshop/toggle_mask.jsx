@@ -2,14 +2,22 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_toggle_mask
+Meta-Default-language=ja
+Name=マスクの表示モードを切り替え
+Name[en]=Cycle Mask Display Modes
+Tags=マスク,mask,表示,view
 Version=1
 Release-Date=2026-03-23
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Target-App=Photoshop
 Description-BEGIN
+[ja]
 レイヤーマスクやクイックマスクの表示を、実行するたびに
 通常表示→オーバーレイ表示→マスクのみ表示
 と順に切り替えます。
+
+[en]
+Cycles the display of layer masks or Quick Mask through normal view, overlay view, and mask-only view each time the script runs.
 Description-END
 SCRIPTMETA-END
 

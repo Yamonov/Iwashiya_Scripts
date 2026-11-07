@@ -5,13 +5,17 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.FrequencySeparationFull.Comp
+Meta-Default-language=ja
 Version=1.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=周波数分離＋カンプ作成
+Name[en]=Create Frequency Separation Layers and Comps
+Tags=周波数分離,frequency separation,レタッチ,retouching,レイヤーカンプ,layer comps
 Author=Murakami Yoshiteru
 Target-App=Photoshop
 Edit-Password-SHA256=34d903dd737546ea:a9773e7d5ed8d07a29f368c9b00c99fc61047f9e859212de8041a54b2c6149c9
 Description-BEGIN
+[ja]
 ①明るさの中間値ダイアログでディテールをぼかしてください。ここで消えたディテールがテクスチャレイヤーに移動します。
 　※重いフィルタなので、プレビューは切っておきましょう。
 ②ガウスぼかしで、①で消えなかった細かいディテールをぼかしてください。
@@ -20,6 +24,16 @@ Expandレイヤーを表示すると、テクスチャレイヤーの操作を�
 テクスチャグループ、カラーグループの表示を切り替えて作業してください。
 
 作業用に、通常・テクスチャのみ+Expand、カラーのみのレイヤーカンプを作成します。
+
+[en]
+1. Blur away detail in the Median dialog. The detail removed here is transferred to the texture layer.
+   This filter is demanding, so leave Preview turned off.
+2. Use Gaussian Blur to remove fine detail that remained after step 1.
+
+Showing the Expand layer makes it easier to work on the texture layer.
+Switch the visibility of the texture and color groups as you work.
+
+Creates working layer comps for the normal view, texture only with Expand, and color only.
 Description-END
 SCRIPTMETA-END
 

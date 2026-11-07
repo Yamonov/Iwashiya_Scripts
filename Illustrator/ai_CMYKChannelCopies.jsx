@@ -4,16 +4,23 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CMYKChannelCopies
+Meta-Default-language=ja
 Version=0.5
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=分版オブジェクト生成
+Name[en]=Create CMYK Separation Copies
+Tags=分版,separations,CMYK,製版,prepress
 Author=Yoshiteru Murakami
 Release-Date=2026-05-27
 Target-App=Illustrator
 Edit-Password-SHA256=VXumlreZb7NPYcxh:f4fb797ffdcf1bef1ddae7ae66c3884fadd33a1ac230f8213a59a84706aa1ace
 Description-BEGIN
+[ja]
 オブジェクトを選択して実行すると、下方向に
 Cのみ、Mのみ………のオブジェクトを複製配置します。
+
+[en]
+Select objects and run the script to place copies below them, with each copy containing only one CMYK channel: C only, M only, and so on.
 Description-END
 SCRIPTMETA-END
 

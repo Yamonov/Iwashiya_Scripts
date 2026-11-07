@@ -2,14 +2,23 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.pentool_shape_path_toggle
+Meta-Default-language=ja
 Version=1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=ペンツールのシェイプとパスを切り替える
+Name[en]=Toggle Pen Tool Shape and Path Modes
+Tags=パス,path,ペンツール,pen tool
 Author=Yoshiteru Murakami
 Release-Date=2026-05-24
 Target-App=Photoshop
 Edit-Password-SHA256=1FYSAB6FvmjMBEBL:9e1c2560dbe96376f1dab34336226ddbf657ed4db6748fc442b180ceb0a329d7
-Description=ペンツール選択時、実行する度にシェイプモードとパスモードを切り替えます。
+Description-BEGIN
+[ja]
+ペンツール選択時、実行する度にシェイプモードとパスモードを切り替えます。
+
+[en]
+Switches the Pen tool between Shape and Path modes each time the script runs while the Pen tool is selected.
+Description-END
 SCRIPTMETA-END
 
 

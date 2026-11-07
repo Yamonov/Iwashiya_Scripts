@@ -4,8 +4,11 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.IncrementSelectedLayerNumber
+Meta-Default-language=ja
 Version=1
 Name=選択レイヤー名をカウントアップ
+Name[en]=Increment the Selected Layer Name Number
+Tags=レイヤー,layers,名前変更,renaming
 Author=Murakami Yoshiteru
 Target-App=Photoshop
 SCRIPTMETA-END

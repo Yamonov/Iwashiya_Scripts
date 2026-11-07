@@ -3,12 +3,20 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_ResetBrushSize
+Meta-Default-language=ja
+Name=ズームに合わせてブラシサイズをリセット
+Name[en]=Reset Brush Size for Current Zoom
+Tags=ブラシ,brush,ズーム,zoom
 Version=1
 Release-Date=2026-03-23
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Target-App=Photoshop
 Description-BEGIN
+[ja]
 ブラシサイズをズームレベルに合わせてリセットします。大きすぎる・小さすぎるサイズからショートカットキーで一発で使いやすいサイズにします。
+
+[en]
+Resets the brush size to suit the current zoom level. Assign a keyboard shortcut to quickly change an excessively large or small brush to a practical size.
 Description-END
 SCRIPTMETA-END
 

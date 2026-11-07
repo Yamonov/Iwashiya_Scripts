@@ -4,13 +4,20 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.NoiseTexturePaintSimple
+Meta-Default-language=ja
 Version=1.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=ノイズテクスチャ塗り
+Name[en]=Create a Noise Texture Layer
+Tags=テクスチャ,texture,描画,painting,ノイズ,noise
 Author=Murakami Yoshiteru
 Target-App=Photoshop
 Description-BEGIN
+[ja]
 ノイズ入りのテクスチャ塗り用レイヤーを作成します。
+
+[en]
+Creates a layer for painting with a noise texture.
 Description-END
 SCRIPTMETA-END
 

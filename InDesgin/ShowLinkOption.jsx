@@ -1,14 +1,22 @@
 ﻿/*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.ShowLinkOption
+Meta-Default-language=ja
 Version=1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/InDesgin
 Name=リンク画像の読み込みオプションを表示
+Name[en]=Show Image Import Options
+Tags=リンク,links,画像,image
 Author=Murakami Yoshiteru
 Target-App=InDesign
 Description-BEGIN
+[ja]
 選択した画像フレーム内のリンク画像を、読み込みオプションを表示して同じファイルから再配置します。
 画像フレームを選択して実行してください。複数選択時は最初のフレーム内の最初の画像を対象にします。
+
+[en]
+Replaces the linked image in the selected image frame with the same file, showing the import options.
+Select an image frame before running. If multiple frames are selected, only the first image in the first frame is processed.
 Description-END
 SCRIPTMETA-END
 */

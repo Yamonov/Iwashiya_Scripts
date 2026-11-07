@@ -3,16 +3,24 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.InDesignCrop_RelinkFitter
+Meta-Default-language=ja
 Version=2
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/InDesgin
 Name=Psで処理したXMPを読み取り、正確な位置に配置
+Name[en]=Restore Image Placement from Photoshop XMP
+Tags=リンク,links,画像,image,XMP
 Author=Murakami Yoshiteru
 Release-Date=2026-08-09
 Target-App=InDesign
 Edit-Password-SHA256=KQKaYksEnVBdnx7G:dd55774c95f3bacda14e9860dfebf5c4c26c4a2452870c28dc2bb331d7218f7a
 Description-BEGIN
+[ja]
 Photoshop_InDesignResizeCropで処理した際に追加されるXMPタグを読み込み、2種類の配置方法をプレビューしながら適用します。
 リンクが更新されていない場合は、自動更新してから処理します。
+
+[en]
+Reads the XMP tags added by Photoshop_InDesignResizeCrop and lets you preview and apply two placement methods.
+If the links are out of date, they are updated automatically before processing.
 Description-END
 SCRIPTMETA-END
 */

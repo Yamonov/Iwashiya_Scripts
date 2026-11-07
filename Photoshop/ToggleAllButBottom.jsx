@@ -2,12 +2,20 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_ToggleAllButBottom
+Meta-Default-language=ja
+Name=最下レイヤー以外の表示を切り替え
+Name[en]=Toggle All Layers Except the Bottom Layer
+Tags=レイヤー,layers,表示,view
 Version=1
 Release-Date=2026-03-23
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Target-App=Photoshop
 Description-BEGIN
+[ja]
 ドキュメントの最下レイヤーまたはレイヤーグループ以外の表示を切り替えます。レイヤーの目玉マークをoption(alt)クリックした動作と同じです。
+
+[en]
+Toggles the visibility of every layer except the bottommost layer or layer group in the document. This is equivalent to Option-clicking (Alt-clicking) the layer's eye icon.
 Description-END
 SCRIPTMETA-END
 */

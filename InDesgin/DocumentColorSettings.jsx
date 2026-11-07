@@ -2,14 +2,21 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.documentcolorsettingsviewer
+Meta-Default-language=ja
 Name=ドキュメントに埋め込まれたカラー設定を表示
+Name[en]=Inspect Document Color Profiles and Policies
+Tags=カラー,color,カラーマネジメント,color management
 Author=Murakami Yoshiteru
 Version=0.5
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/InDesgin
 Target-App=InDesign
 Edit-Password-SHA256=DYW2QUKqdGvnurN6:b5f02a2380ac64a637b022c788943e6192c84e3e09d89bef779b938a32c5dd75
 Description-BEGIN
+[ja]
 ドキュメントのRGB・CMYKプロファイルをアプリ側の作業用プロファイルと比較し、ドキュメントのカラーマネジメントポリシーとともに表示します。設定は変更しません。
+
+[en]
+Compares the document's RGB and CMYK profiles with the application's working profiles, and displays them together with the document's color management policies. No settings are changed.
 Description-END
 SCRIPTMETA-END
 

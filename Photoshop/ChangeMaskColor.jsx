@@ -2,12 +2,20 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Photoshop_ChangeMaskColor
+Meta-Default-language=ja
+Name=マスクのオーバーレイ色を切り替え
+Name[en]=Cycle Mask Overlay Colors
+Tags=マスク,mask,カラー,color
 Version=1
 Release-Date=2026-03-23
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Target-App=Photoshop
 Description-BEGIN
+[ja]
 マスクのオーバーレイ表示カラーを、実行する度に色相環で60度ごとに切り替えます。
+
+[en]
+Cycles the mask overlay color around the hue wheel in 60-degree steps each time the script runs.
 Description-END
 SCRIPTMETA-END
 

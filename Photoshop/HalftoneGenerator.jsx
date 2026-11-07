@@ -2,19 +2,30 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Halftone_Generator
+Meta-Default-language=ja
 Version=1.2
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=Photoshopで疑似AMスクリーン生成
+Name[en]=Generate CMYK AM Halftone Screens
+Tags=網点,halftone,分版,separations,製版,prepress
 Author=Murakami Yoshiteru
 Release-Date=2025-12-23
 Target-App=Photoshop
 Edit-Password-SHA256=S2C2Of7I542XGuHs:5f4fdf97ab915c48dadd217f5ef3df991529d0f3e352e221f596e2c1b6ecf800
 Description-BEGIN
+[ja]
 ・CMYK画像をPhotoshopの疑似AMスクリーン変換します。網角、線数を個別に設定できます。
 
 使用前に実配置サイズ・必要な実効解像度にリサイズしてから実行してください。
 Illustrator/InDesignのオブジェクトやページは、PDFをPhotoshopに読み込ませます。
 読み込み設定は、アンチエイリアスなし、解像度2,400で実寸で開いてください。
+
+[en]
+- Converts a CMYK image into simulated AM halftone screens in Photoshop. Screen angles and frequencies can be set individually.
+
+Before running, resize the image to its final placed size and the required effective resolution.
+To process Illustrator or InDesign objects or pages, open a PDF in Photoshop.
+Open it at actual size and 2,400 ppi with anti-aliasing disabled.
 Description-END
 SCRIPTMETA-END
 */

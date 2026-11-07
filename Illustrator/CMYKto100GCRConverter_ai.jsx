@@ -3,14 +3,18 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
+Meta-Default-language=ja
 Version=2.5
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=色を変えずにCMYK値を調整
+Name[en]=Optimize CMYK Color Separations
+Tags=カラー,color,CMYK,製版,prepress
 Author=Murakami Yoshiteru
 Release-Date=2026-10-12
 Target-App=Illustrator
 Edit-Password-SHA256=oS5aCLoTCKedGLZN:3d8282cb048f8c02d5bf1dca0493471b70fda75c2a3131e4cb0c10b4c1688127
 Description-BEGIN
+[ja]
 ・選択したCMYKオブジェクトのカラーを、発色を維持しつつ、印刷でのブレが少ないカラー、CMYのうち１〜２版（＋K）の値に整理します。
 ・彩度調整オプションで、仕上がりの彩度を上げられます。
 ・K量の調整オプションで、Kを減らす方向または増やす方向へ段階的に寄せられます。増やすとより多くのグレートーンがKのみに、減らすとCMYからKを抜いてK濁りを抑えます。
@@ -23,6 +27,20 @@ Description-BEGIN
 ・複雑なパスのクリッピング内オブジェクトは取りこぼすことがあります。
 ※ 分版プレビューでKをオフにしてから実行すると、効果と処理が抜けた箇所が分かりやすくなります。
 ・グラデーションメッシュとブレンドオブジェクトは非対応です。
+
+[en]
+- Simplifies the colors of selected CMYK objects to one or two CMY plates plus K, preserving their appearance while reducing variation in print.
+- The saturation option can increase the saturation of the result.
+- The K amount option adjusts black ink in steps, either decreasing or increasing it. Increasing K converts more gray tones to K only; decreasing it reduces black in CMY mixtures to avoid muddy colors.
+- Supports global swatches and gradients.
+- Renames converted CMYK global swatches to their CMYK values, retaining custom names in parentheses.
+- When "Avoid Automatic K100 Overprint" is enabled, fully opaque solid colors in the selection that end up as K100, including 100% grayscale black, are replaced with a shared K100/Y1 global swatch (Y is set to 1.01%). Overprint is also disabled for the affected objects.
+
+Important:
+- Use Expand Appearance on text with fills applied through the Appearance panel.
+- Objects inside clipping masks with complex paths may be missed.
+- Turn off K in Separations Preview before running the script to make the effect and any missed areas easier to see.
+- Gradient meshes and blend objects are not supported.
 Description-END
 SCRIPTMETA-END
 */

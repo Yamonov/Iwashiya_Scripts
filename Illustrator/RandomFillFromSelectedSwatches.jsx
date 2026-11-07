@@ -3,13 +3,22 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.RandomFillFromSelectedSwatches
+Meta-Default-language=ja
 Version=1.1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=選択スウォッチから塗りと線をランダム割り当て
+Name[en]=Randomize Fills and Strokes from Swatches
+Tags=カラー,color,スウォッチ,swatches,ランダム,random
 Author=Murakami Yoshiteru
 Release-Date=2026-08-21
 Target-App=Illustrator
-Description=選択中の各オブジェクトの塗りと線に、複数選択したスウォッチを、偏りと長い連続を抑えてランダムに割り当てます。結果を繰り返し試し、キャンセルで実行前の状態に戻せます。
+Description-BEGIN
+[ja]
+選択中の各オブジェクトの塗りと線に、複数選択したスウォッチを、偏りと長い連続を抑えてランダムに割り当てます。結果を繰り返し試し、キャンセルで実行前の状態に戻せます。
+
+[en]
+Randomly assigns the selected swatches to the fills and strokes of selected objects, reducing bias and long runs of the same swatch. You can try different results repeatedly or cancel to restore the original state.
+Description-END
 SCRIPTMETA-END
 */
 

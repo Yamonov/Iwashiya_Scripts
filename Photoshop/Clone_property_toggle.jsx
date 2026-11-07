@@ -4,9 +4,12 @@
 
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.Clone_property_toggle
+Meta-Default-language=ja
 Version=1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=クローンソースとプロパティを表示切り替え
+Name[en]=Toggle Clone Source and Properties Panels
+Tags=パネル,panel,レタッチ,retouching
 Author=Murakami Yoshiteru
 Target-App=Photoshop
 Edit-Password-SHA256=BS4FB5f2srYDWER5:56cdf07299c2c26623d132b3dd154b8d9fe7a7a21a86394cd49ab2ee21eb83ea

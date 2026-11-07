@@ -3,19 +3,30 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.IllustratorCrop_RelinkFitter
+Meta-Default-language=ja
 Version=2
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=Psで処理したXMPを読み取り、正確な位置に配置
+Name[en]=Restore Image Placement from Photoshop XMP
+Tags=リンク,links,画像,image,XMP
 Author=Murakami Yoshiteru
 Release-Date=2026-08-10
 Target-App=Illustrator
 Edit-Password-SHA256=ZOv20mIwVP26NzJj:46c00dfa92b9392774dae9232e5b800346e33ba2dccaa2bdc8e7dfa99a7845bd
 Description-BEGIN
+[ja]
 Photoshop側のIllustrator ResizeCropスクリプトで追加されるXMPタグを読み込み、Illustrator上のクリッピングマスク位置に合わせてリンク画像を再配置します。
 リンク画像を更新してから、XMPと更新後の画像寸法を使って処理します。
 
 Photoshopでxmpタグを埋め込んでいない場合は動作しません。
 Photoshop側のIllustrator ResizeCropスクリプトとセットで運用してください。
+
+[en]
+Reads the XMP tags added by the Illustrator ResizeCrop script in Photoshop and repositions linked images to match their clipping masks in Illustrator.
+Updates the linked images first, then uses the XMP data and the updated image dimensions.
+
+Requires the XMP tags to have been embedded in Photoshop.
+Use this together with the Illustrator ResizeCrop script for Photoshop.
 Description-END
 SCRIPTMETA-END
 

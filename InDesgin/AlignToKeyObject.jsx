@@ -1,17 +1,28 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.AlignToKeyObject
+Meta-Default-language=ja
 Version=1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/InDesgin
 Name=キーオブジェクトにサイズを合わせる
+Name[en]=Match Size and Rotation to Key Object
+Tags=変形,transform,レイアウト,layout
 Author=Murakami Yoshiteru
 Target-App=InDesign
 Description-BEGIN
+[ja]
 キーオブジェクトを基準に、他の選択オブジェクトの幅や高さを揃えます。
 複数のオブジェクトを選択してキーオブジェクトを指定し、ダイアログで「幅のみ」「高さのみ」「幅と高さの両方」から選択して実行します。
 回転したオブジェクトは、その回転方向に沿った幅・高さで揃えます。「角度を一致」をオンにすると、キーオブジェクトの回転角度にも合わせます。
 回転中心は、右側の9点の基準点表示から選択できます。
 「角度を一致」がオンの場合は、選択した基準点の位置を維持してサイズと角度を合わせます。
+
+[en]
+Matches the width or height of other selected objects to the key object.
+Select multiple objects, designate a key object, then choose width only, height only, or both in the dialog.
+For rotated objects, dimensions are measured along each object's rotated axes. Enable Match Angle to also match the key object's rotation.
+Choose the rotation reference point from the nine-point control on the right.
+When Match Angle is enabled, the selected reference point stays in place while the size and angle are matched.
 Description-END
 SCRIPTMETA-END
 */

@@ -1,14 +1,22 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.EmbedAllLinks
+Meta-Default-language=ja
 Version=1
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/InDesgin
 Name=すべてのリンクを埋め込む
+Name[en]=Embed All Document Links
+Tags=リンク,links,埋め込み,embedding
 Author=Murakami Yoshiteru
 Target-App=InDesign
 Description-BEGIN
+[ja]
 アクティブドキュメント内のすべてのリンクを埋め込みます。
 選択状態にかかわらず、ドキュメント全体のリンクを対象にします。
+
+[en]
+Embeds all links in the active document.
+Processes links throughout the document, regardless of the current selection.
 Description-END
 SCRIPTMETA-END
 */

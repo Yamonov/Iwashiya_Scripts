@@ -3,12 +3,21 @@
 /*
 SCRIPTMETA-BEGIN
 Script-ID=keypadSettingsChager_Ai
+Meta-Default-language=ja
 Version=1.5
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=各種設定をテンキーで変更
+Name[en]=Change Settings with the Numeric Keypad
+Tags=設定,settings,キーボード,keyboard,変形,transform
 Author=Murakami Yoshiteru
 Target-App=Illustrator
-Description=テンキー入力で変形基準点とIllustratorの各種設定を即時変更します。
+Description-BEGIN
+[ja]
+テンキー入力で変形基準点とIllustratorの各種設定を即時変更します。
+
+[en]
+Instantly changes the transformation reference point and various Illustrator settings using the numeric keypad.
+Description-END
 SCRIPTMETA-END
 */
 
