@@ -2,33 +2,43 @@ SCRIPTMETA-DIST-BEGIN
 
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
 Version=2.5
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Illustrator/CMYKto100GCRConverter_ai.jsx
 
 Script-ID=org.iwashi.CurledLine
 Version=1.0.0
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Illustrator/CurledLine.jsx
 
 Script-ID=org.iwashi.IllustratorCrop_RelinkFitter
 Version=2
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Illustrator/IllustratorCrop_RelinkFitter.jsx
 
 Script-ID=org.iwashi.CMYKChannelCopies
 Version=0.5
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Illustrator/ai_CMYKChannelCopies.jsx
 
 Script-ID=org.iwashi.OpenIllustratorLinksPanel
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Illustrator/OpenIllustratorLinksPanel.jsx
 
 Script-ID=org.iwashi.PreserveGuideVisibilityInPreview
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Illustrator/PreserveGuideVisibilityInPreview.jsx
 
 Script-ID=org.iwashi.RandomFillFromSelectedSwatches
 Version=1.1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Illustrator/RandomFillFromSelectedSwatches.jsx
 
 Script-ID=org.iwashi.ToggleGuide_ai
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Illustrator/ToggleGuide_ai.jsx
 
 Script-ID=keypadSettingsChager_Ai
 Version=1.5
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Illustrator/KeypadSettingsChanger.jsx
 
 Script-ID=org.iwashi.textframewidthchanger
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Illustrator/TextFrameWidth.jsx
 
 SCRIPTMETA-DIST-END
 

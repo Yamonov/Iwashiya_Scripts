@@ -2,86 +2,114 @@ SCRIPTMETA-DIST-BEGIN
 
 Script-ID=org.iwashi.Halftone_Generator
 Version=1.2
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/HalftoneGenerator.jsx
 
 Script-ID=org.iwashi.Photoshop_Illustrator_Resize
 Version=2.3.5
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/PhotoshopIllustratorResizeCrop.jsx
 
 Script-ID=org.iwashi.Photoshop_InDesign_Resize
 Version=2.8.5
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/Photoshop_InDesignResizeCrop.jsx
 
 Script-ID=org.iwashi.Photoshop_ChangeMaskColor
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/ChangeMaskColor.jsx
 
 Script-ID=org.iwashi.Photoshop_ClippingViewDelete
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/Clipping_View_Delete.jsx
 
 Script-ID=org.iwashi.Photoshop_ClippingView
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/clippingView.jsx
 
 Script-ID=org.iwashi.Photoshop_OpacityFlowExposure
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/OpacityFlowExposure/opacityFlowExposure.jsxinc
 
 Script-ID=org.iwashi.pentool_shape_path_toggle
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/Pentool_Shape_path_toggle.jsx
 
 Script-ID=org.iwashi.Photoshop_ResetBrushSize
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/ResetBrushSize.jsx
 
 Script-ID=org.iwashi.Photoshop_ResetBrushSizeType
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/ResetBrushSizeType.jsx
 
 Script-ID=org.iwashi.Photoshop_toggle_mask
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/toggle_mask.jsx
 
 Script-ID=org.iwashi.Photoshop_ToggleAllButBottom
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/ToggleAllButBottom.jsx
 
 Script-ID=org.iwashi.toggleBrushesPalette
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/BrushPanel.jsx
 
 Script-ID=org.iwashi.Clone_property_toggle
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/Clone_property_toggle.jsx
 
 Script-ID=org.iwashi.ColorPanel
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/ColorPanel.jsx
 
 Script-ID=org.iwashi.foregroundColor2SolidGray
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/foregroundColor2SolidGray.jsx
 
 Script-ID=org.iwashi.StarLayerToggle
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/StarLayerToggle.jsx
 
 Script-ID=org.iwashi.FrequencySeparationFull.Comp
 Version=1.1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/FrequencySeparationFull_Comp.jsx
 
 Script-ID=org.iwashi.FSComp_toggle
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/FSComp_toggle.jsx
 
 Script-ID=org.iwashi.FrequencySeparationSimple
 Version=1.1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/FrequencySeparation_Simple.jsx
 
 Script-ID=org.iwashi.FrequencySeparationFull
 Version=1.1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/FrequencySeparationFull.jsx
 
 Script-ID=org.iwashi.NoiseTexturePaint
 Version=1.1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/NoiseTexturePaint.jsx
 
 Script-ID=org.iwashi.NoiseTexturePaintSimple
 Version=1.1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/NoiseTexturePaintSimple.jsx
 
 Script-ID=org.iwashi.CCLibPanelToggle
 Version=0.5
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/CCLibPanel.scpt
 
 Script-ID=org.iwashi.LayerColorSelector
 Version=1.1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/LayerColorSelector.jsx
 
 Script-ID=org.iwashi.AdjustmentLayerPanel
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/AdjustmentLayerPanel.jsx
 
 Script-ID=org.iwashi.IncrementSelectedLayerNumber
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/IncrementSelectedLayerNumber.jsx
 
 Script-ID=org.iwashi.photoshop.opencurrentdocumentinbridge
 Version=0.1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/OpenCurrentDocumentInBridge.applescript
 
 SCRIPTMETA-DIST-END

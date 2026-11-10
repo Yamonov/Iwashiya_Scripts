@@ -2,26 +2,34 @@ SCRIPTMETA-DIST-BEGIN
 
 Script-ID=org.iwashi.InDesignCrop_RelinkFitter
 Version=2
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/InDesgin/InDesignCrop_RelinkFitter.jsx
 
 Script-ID=org.iwashi.AlignToKeyObject
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/InDesgin/AlignToKeyObject.jsx
 
 Script-ID=local.yamo.script_tgjzc681xeev
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/InDesgin/ClearFrameFittingOptions.jsx
 
 Script-ID=org.iwashi.documentcolorsettingsviewer
 Version=0.5
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/InDesgin/DocumentColorSettings.jsx
 
 Script-ID=org.iwashi.EmbedAllLinks
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/InDesgin/EmbedAllLinks.jsx
 
 Script-ID=org.iwashi.MatchApplicationColorSettings
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/InDesgin/MatchApplicationColorSettings.jsx
 
 Script-ID=org.iwashi.ShowLinkOption
 Version=1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/InDesgin/ShowLinkOption.jsx
 
 Script-ID=org.iwashi.FindLinksByName
 Version=1.1
+Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/InDesgin/FindLinksByName.jsx
 
 SCRIPTMETA-DIST-END
