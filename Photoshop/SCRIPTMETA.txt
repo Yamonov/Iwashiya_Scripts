@@ -69,7 +69,7 @@ Version=1
 Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/StarLayerToggle.jsx
 
 Script-ID=org.iwashi.FrequencySeparationFull.Comp
-Version=1.2
+Version=1.1
 Latest-Page-URL=https://github.com/Yamonov/Iwashiya_Scripts/blob/main/Photoshop/FrequencySeparationFull_Comp.jsx
 
 Script-ID=org.iwashi.FSComp_toggle
