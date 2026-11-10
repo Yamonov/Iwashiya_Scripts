@@ -6,7 +6,7 @@
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.FrequencySeparationFull.Comp
 Meta-Default-language=ja
-Version=1.1
+Version=1.2
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Photoshop
 Name=周波数分離＋カンプ作成
 Name[en]=Create Frequency Separation Layers and Comps
