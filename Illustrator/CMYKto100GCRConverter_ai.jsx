@@ -4,13 +4,13 @@
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
 Meta-Default-language=ja
-Version=2.5
+Version=2.7
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=色を変えずにCMYK値を調整
 Name[en]=Optimize CMYK Color Separations
 Tags=カラー,color,CMYK,製版,prepress
 Author=Murakami Yoshiteru
-Release-Date=2026-10-12
+Release-Date=2026-11-17
 Target-App=Illustrator
 Edit-Password-SHA256=oS5aCLoTCKedGLZN:3d8282cb048f8c02d5bf1dca0493471b70fda75c2a3131e4cb0c10b4c1688127
 Description-BEGIN
@@ -19,12 +19,15 @@ Description-BEGIN
 ・彩度調整オプションで、仕上がりの彩度を上げられます。
 ・K量の調整オプションで、Kを減らす方向または増やす方向へ段階的に寄せられます。増やすとより多くのグレートーンがKのみに、減らすとCMYからKを抜いてK濁りを抑えます。
 ・グローバルスウォッチ、グラデーションにも対応しています。
-・変換したCMYKグローバルスウォッチの名前をCMYK値に更新し、独自の名前は括弧内に保持します。
+・選択したグループ内を多重クリッピングまで調べ、複合パスを一度ずつ処理します。
+・変換済みのグローバルカラーとグラデーションを作成し、選択範囲に適用します。変換済みCMYKグローバルスウォッチの名前にはCMYK値と元の独自名を使用します。
+・「指定スウォッチを無視」で、チェックしたグローバルカラー・特色・グラデーションの定義を使うオブジェクト全体を処理対象から外せます。濃度違いとグラデーションの停止点も判定します。
+・無視するスウォッチは行をクリックして指定・解除します。Spaceキーでも、最後に操作した行の指定を切り替えられます。
 ・「K100の自動墨ノセを回避」をオンにすると、選択範囲内で不透明度100%の単色のうち、最終結果がK100のものとグレー濃度100%のものを、K100/Y1の共通グローバルスウォッチ（Y設定値1.01%）に置き換え、対象のオーバープリント属性も解除します。
 
 ■注意！
 ・アピアランスで塗ったテキストはアピアランス分割してください。
-・複雑なパスのクリッピング内オブジェクトは取りこぼすことがあります。
+・内部を取得できないグループや複合パスは、未適用オブジェクトとして報告します。
 ※ 分版プレビューでKをオフにしてから実行すると、効果と処理が抜けた箇所が分かりやすくなります。
 ・グラデーションメッシュとブレンドオブジェクトは非対応です。
 
@@ -33,12 +36,15 @@ Description-BEGIN
 - The saturation option can increase the saturation of the result.
 - The K amount option adjusts black ink in steps, either decreasing or increasing it. Increasing K converts more gray tones to K only; decreasing it reduces black in CMY mixtures to avoid muddy colors.
 - Supports global swatches and gradients.
-- Renames converted CMYK global swatches to their CMYK values, retaining custom names in parentheses.
+- Traverses nested clipping groups and processes each compound path once.
+- Creates converted global colors and gradients and applies them within the selection. Converted CMYK global swatch names include the CMYK values and the original custom name.
+- "Ignore specified swatches" excludes entire objects that use checked global color, spot color, or gradient definitions, including tints and gradient stops.
+- Click a swatch row to toggle its ignore setting. Press and release Space to toggle the last active row.
 - When "Avoid Automatic K100 Overprint" is enabled, fully opaque solid colors in the selection that end up as K100, including 100% grayscale black, are replaced with a shared K100/Y1 global swatch (Y is set to 1.01%). Overprint is also disabled for the affected objects.
 
 Important:
 - Use Expand Appearance on text with fills applied through the Appearance panel.
-- Objects inside clipping masks with complex paths may be missed.
+- Groups and compound paths whose contents cannot be accessed are reported as unapplied objects.
 - Turn off K in Separations Preview before running the script to make the effect and any missed areas easier to see.
 - Gradient meshes and blend objects are not supported.
 Description-END
@@ -83,6 +89,24 @@ var UI_TEXT = {
     },
     info: { ja: "情報", en: "Info" },
     optionGroup: { ja: "オプション", en: "Options" },
+    ignoreSpecifiedSwatches: { ja: "指定スウォッチを無視", en: "Ignore specified swatches" },
+    ignoreSpecifiedSwatchesHelp: {
+        ja: "チェックしたスウォッチの定義を使うオブジェクト全体を無視します。濃度違いとグラデーションの停止点を含みます。テキストはフレーム全体が対象です。",
+        en: "Ignores entire objects using the checked swatch definitions, including tints and gradient stops. Text is handled per frame."
+    },
+    ignoredSwatchList: { ja: "無視するスウォッチ", en: "Swatches to ignore" },
+    noLinkedSwatches: { ja: "対象のスウォッチがありません。", en: "No eligible swatches." },
+    swatchListReadFailed: { ja: "スウォッチを取得できませんでした。", en: "Could not read the swatches." },
+    swatchListPartial: { ja: "取得できなかったスウォッチ: {count}件", en: "Unreadable swatches: {count}" },
+    swatchGlobal: { ja: "グローバル", en: "Global color" },
+    swatchSpot: { ja: "特色", en: "Spot color" },
+    swatchGradient: { ja: "グラデーション", en: "Gradient" },
+    swatchCheckHelp: { ja: "□：無視指定なし／■：無視指定あり。行をクリックすると切り替わります。Spaceは離したときに、最後に操作した行を1回だけ切り替えます。", en: "□: not ignored / ■: ignored. Click a row to toggle it. Press and release Space to toggle the last active row once." },
+    swatchPreviewHelp: { ja: "識別用のRGBプレビュー", en: "RGB preview for identification" },
+    swatchGradientPreviewHelp: { ja: "グラデーションの簡易RGBプレビュー", en: "Approximate RGB gradient preview" },
+    swatchPreviewUnavailable: { ja: "色のプレビューを取得できませんでした。", en: "The color preview could not be read." },
+    ignoredObjects: { ja: "無視件数", en: "Ignored objects" },
+    ignoredSwatchesResult: { ja: "選択内での無視スウォッチ", en: "Ignored swatches in selection" },
     estimateTime: { ja: "予測最大時間", en: "Estimated maximum time" },
     estimateHelp: {
         ja: "使用色数とキャッシュ利用数で変わるため、目安です。キャッシュ利用率20%程度で計算しています。",
@@ -328,12 +352,12 @@ var SKIP_REASON_LABELS = {
     patternColor: { ja: "パターン等", en: "Patterns, etc." },
     nonCMYK: { ja: "非CMYKカラー", en: "Non-CMYK color" },
     noCandidate: { ja: "許容色差内の変換候補なし", en: "No candidate within allowed difference" },
-    spotWriteFailed: { ja: "スポットカラー更新不可", en: "Spot color update failed" },
+    spotWriteFailed: { ja: "グローバルカラー作成不可", en: "Global color creation failed" },
+    gradientWriteFailed: { ja: "グラデーション作成不可", en: "Gradient creation failed" },
     autoBlackOverprintFailed: { ja: "墨ノセ回避色の適用不可", en: "Could not apply the automatic overprint avoidance color" },
     autoBlackOverprintNameConflict: { ja: "墨ノセ回避スウォッチと同名の別の色あり", en: "Another color uses the overprint avoidance swatch name" },
     autoBlackOverprintReadFailed: { ja: "墨ノセ回避スウォッチの確認不可", en: "Could not inspect the overprint avoidance swatch" },
     autoBlackOverprintCreateFailed: { ja: "墨ノセ回避スウォッチの作成不可", en: "Could not create the overprint avoidance swatch" },
-    autoBlackOverprintUpdateFailed: { ja: "墨ノセ回避スウォッチの補正不可", en: "Could not update the overprint avoidance swatch" },
     autoBlackOverprintVerifyFailed: { ja: "墨ノセ回避スウォッチのY値確認不可", en: "Could not verify the overprint avoidance swatch's yellow value" },
     overprintWriteFailed: { ja: "オーバープリント解除不可", en: "Could not disable overprint" },
     opacityReadFailed: { ja: "不透明度の確認不可", en: "Opacity could not be checked" },
@@ -405,6 +429,7 @@ function resetSkipCount() {
 function countSkip(entry, reason) {
     if (!entry || entry.skipped) return;
     entry.skipped = true;
+    if (entry.workList) entry.workList.skipped[entry.workIndex] = true;
     reason = reason || "unknown";
     addSkipBreakdownEntry(gSkipBreakdown, "process:" + reason, skipReasonLabel(reason), 1);
 }
@@ -419,18 +444,21 @@ function itemUUIDKey(item) {
 
 function addUniqueSelectableItem(items, item, seenKeys, fallbackRefs) {
     if (!item) return false;
-    var key = itemUUIDKey(item);
-    if (key) {
-        if (seenKeys[key]) return false;
-        seenKeys[key] = true;
-    } else {
-        for (var i = 0, n = fallbackRefs.length; i < n; i++) {
-            if (fallbackRefs[i] === item) return false;
-        }
-        fallbackRefs.push(item);
-    }
+    var key = artItemKey(item, fallbackRefs);
+    if (seenKeys[key]) return false;
+    seenKeys[key] = true;
     items.push(item);
     return true;
+}
+
+function artItemKey(item, references) {
+    var key = itemUUIDKey(item);
+    if (key) return key;
+    for (var i = 0; i < references.length; i++) {
+        if (references[i] === item) return 'ref:' + i;
+    }
+    references.push(item);
+    return 'ref:' + (references.length - 1);
 }
 
 function clearSelection(doc) {
@@ -758,14 +786,414 @@ function formatTargetCountText(targetCount, unsupportedCount) {
     return s;
 }
 
-function showConvertOptionsDialog(stats) {
+function swatchKindLabel(kind) {
+    var keys = { global: 'swatchGlobal', spot: 'swatchSpot', gradient: 'swatchGradient' };
+    return uiText(keys[kind]);
+}
+
+function swatchPreviewRGB(color, cache) {
+    var type = String(color.typename);
+    var tint = 1;
+    if (type === 'SpotColor') {
+        tint = clamp01(color.tint / 100);
+        color = color.spot.color;
+        type = String(color.typename);
+    }
+    var values;
+    var space;
+    if (type === 'CMYKColor') {
+        values = [color.cyan, color.magenta, color.yellow, color.black];
+    } else if (type === 'LabColor') {
+        values = [color.l, color.a, color.b];
+        space = ImageColorSpace.LAB;
+    } else if (type === 'GrayColor') {
+        values = [color.gray];
+    } else if (type === 'RGBColor') {
+        values = [color.red, color.green, color.blue];
+    } else {
+        throw new Error('Preview color unavailable');
+    }
+    var key = type + ':' + values.join(',') + ':' + tint;
+    if (cache[key]) return cache[key];
+    for (var v = 0; v < values.length; v++) {
+        if (typeof values[v] !== 'number' || !isFinite(values[v])) throw new Error('Invalid preview components');
+    }
+    var rgb;
+    // 識別用の色玉は簡易計算とし、CMYKとグレーの表示だけのためにCMMを呼ばない。
+    // 本体の色変換は、このプレビュー処理とは別に従来どおり行う。
+    if (type === 'CMYKColor') {
+        var ink = 1 - clamp01(values[3] / 100);
+        rgb = [255 * (1 - clamp01(values[0] / 100)) * ink,
+            255 * (1 - clamp01(values[1] / 100)) * ink,
+            255 * (1 - clamp01(values[2] / 100)) * ink];
+    } else if (type === 'GrayColor') {
+        var gray = 255 * (1 - clamp01(values[0] / 100));
+        rgb = [gray, gray, gray];
+    } else if (type === 'RGBColor') {
+        rgb = values;
+    } else {
+        rgb = app.convertSampleColor(space, values, ImageColorSpace.RGB, ColorConvertPurpose.defaultpurpose);
+    }
+    var result = [];
+    for (var i = 0; i < 3; i++) {
+        if (typeof rgb[i] !== 'number' || !isFinite(rgb[i])) throw new Error('Invalid RGB preview');
+        result.push(clamp01(rgb[i] / 255) * tint + 1 - tint);
+    }
+    result.push(1);
+    cache[key] = result;
+    return result;
+}
+
+function swatchPreviewColors(entry, cache) {
+    try {
+        if (entry.kind !== 'gradient') {
+            return { kind: 'solid', colors: [swatchPreviewRGB(entry.reference.color, cache)] };
+        }
+        var stops = entry.reference.gradientStops;
+        var samples = [];
+        for (var i = 0; i < stops.length; i++) {
+            var stop = stops[i];
+            var rgb = swatchPreviewRGB(stop.color, cache);
+            var position = stop.rampPoint;
+            var opacity = stop.opacity;
+            if (typeof position !== 'number' || !isFinite(position) || typeof opacity !== 'number' || !isFinite(opacity)) {
+                throw new Error('Gradient preview attributes unavailable');
+            }
+            samples.push({ position: position / 100, color: [rgb[0], rgb[1], rgb[2], clamp01(opacity / 100)] });
+        }
+        if (samples.length < 2) throw new Error('Gradient preview unavailable');
+        samples.sort(function (a, b) { return a.position - b.position; });
+        var colors = [];
+        var index = 0;
+        for (var x = 0; x < 15; x++) {
+            var position = x / 14;
+            while (index + 1 < samples.length && position > samples[index + 1].position) index++;
+            var first = samples[index];
+            var last = samples[Math.min(index + 1, samples.length - 1)];
+            var distance = last.position - first.position;
+            var amount = distance > 0 ? clamp01((position - first.position) / distance) : 0;
+            var color = [];
+            for (var channel = 0; channel < 4; channel++) {
+                color.push(first.color[channel] * (1 - amount) + last.color[channel] * amount);
+            }
+            colors.push(color);
+        }
+        return { kind: 'gradient', colors: colors };
+    } catch (e) {
+        return { kind: 'unknown', colors: [] };
+    }
+}
+
+function createSwatchPreviewPNG(preview) {
+    // 15pxのRGBA画像をメモリ上で生成する。PNGのIDATは非圧縮DEFLATEを使う。
+    var size = 15;
+    var bytes = new Array(size * (size * 4 + 1));
+    var byteIndex = 0;
+    var borderColor = [0.5, 0.5, 0.5, 1];
+    var darkColor = [0.4, 0.4, 0.4, 1];
+    var lightColor = [0.88, 0.88, 0.88, 1];
+    for (var y = 0; y < size; y++) {
+        bytes[byteIndex++] = 0;
+        for (var x = 0; x < size; x++) {
+            var dx = x + 0.5 - size / 2;
+            var dy = y + 0.5 - size / 2;
+            var distance = Math.sqrt(dx * dx + dy * dy);
+            var alpha = clamp01(7 - distance);
+            var color;
+            if (distance > 5.8) color = borderColor;
+            else if (preview.kind === 'solid') color = preview.colors[0];
+            else if (preview.kind === 'gradient') color = preview.colors[x];
+            else {
+                color = Math.abs(x - y) < 1 ? darkColor : lightColor;
+            }
+            for (var c = 0; c < 3; c++) bytes[byteIndex++] = Math.round(clamp01(color[c]) * 255);
+            bytes[byteIndex++] = Math.round(alpha * clamp01(color[3]) * 255);
+        }
+    }
+    var data = '';
+    var adlerA = 1;
+    var adlerB = 0;
+    for (var b = 0; b < bytes.length; b++) {
+        data += String.fromCharCode(bytes[b]);
+        adlerA = (adlerA + bytes[b]) % 65521;
+        adlerB = (adlerB + adlerA) % 65521;
+    }
+    function uint32(value) {
+        return String.fromCharCode((value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255);
+    }
+    if (!swatchPreviewCRCTable) {
+        swatchPreviewCRCTable = [];
+        for (var t = 0; t < 256; t++) {
+            var value = t;
+            for (var bit = 0; bit < 8; bit++) value = (value & 1) ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+            swatchPreviewCRCTable[t] = value;
+        }
+    }
+    function chunk(type, content) {
+        var payload = type + content;
+        var crc = -1;
+        for (var i = 0; i < payload.length; i++) {
+            crc = (crc >>> 8) ^ swatchPreviewCRCTable[(crc ^ payload.charCodeAt(i)) & 255];
+        }
+        return uint32(content.length) + payload + uint32((crc ^ -1) >>> 0);
+    }
+    var length = data.length;
+    var complement = 65535 - length;
+    var compressed = '\x78\x01\x01' + String.fromCharCode(length & 255, length >>> 8, complement & 255, complement >>> 8) +
+        data + uint32((adlerB << 16) | adlerA);
+    return '\x89PNG\r\n\x1a\n' + chunk('IHDR', uint32(size) + uint32(size) + '\x08\x06\x00\x00\x00') +
+        chunk('IDAT', compressed) + chunk('IEND', '');
+}
+
+function swatchPreviewImage(preview) {
+    if (!preview) return null;
+    if (!preview.image && typeof preview.png === 'string') preview.image = ScriptUI.newImage(preview.png);
+    return preview.image || null;
+}
+
+function createSwatchList(parent, entries, width, height, checkable, showKind) {
+    var rowHeight = checkable ? 24 : 22;
+    var checkWidth = 32;
+    var kindWidth = 104;
+    var contentWidth = Math.max(80, width - 24);
+    var columnWidths = [];
+    if (checkable) columnWidths.push(checkWidth);
+    columnWidths.push(Math.max(80, contentWidth - (checkable ? checkWidth : 0) - (showKind ? kindWidth : 0)));
+    if (showKind) columnWidths.push(kindWidth);
+    var properties = {
+        numberOfColumns: columnWidths.length,
+        showHeaders: false,
+        columnWidths: columnWidths
+    };
+    var list = parent.add('listbox', undefined, [], properties);
+    list.alignment = ['fill', 'top'];
+    list.preferredSize = [width, height];
+    list.minimumSize = [width, height];
+    list.maximumSize = [width, height];
+    if (checkable) {
+        try {
+            var listFont = list.graphics.font;
+            var listFontName = listFont && (listFont.family || listFont.name) || 'dialog';
+            var listFontSize = listFont && Number(listFont.size) || 12;
+            list.graphics.font = ScriptUI.newFont(listFontName, 'REGULAR', Math.max(14, listFontSize));
+        } catch (fontError) { }
+    }
+    list.itemSize = [width - 20, rowHeight];
+    var colorCache = {};
+    var imageCache = {};
+    var updatingSelection = false;
+    var keyboardSelection = false;
+    var lastIndex = -1;
+    var checkInputEnabled = checkable;
+    var spaceHeld = false;
+    var spaceIndex = -1;
+    var spaceValue = false;
+
+    function checkText(ignored) {
+        // 小さく表示されやすい投票欄の字形を避け、輪郭と塗りで状態を区別する。
+        return '  ' + (ignored ? '\u25A0' : '\u25A1');
+    }
+
+    function previewFor(entry) {
+        if (entry.preview) return entry.preview;
+        if (!entry.reference) return null;
+        var preview = swatchPreviewColors(entry, colorCache);
+        entry.previewKind = preview.kind;
+        var key = preview.kind;
+        for (var p = 0; p < preview.colors.length; p++) key += ':' + preview.colors[p].join(',');
+        try {
+            if (!imageCache[key]) imageCache[key] = { key: key, png: createSwatchPreviewPNG(preview), image: null };
+            entry.preview = imageCache[key];
+        } catch (imageError) { }
+        return entry.preview || null;
+    }
+
+    for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i];
+        var item = list.add('item', checkable ? checkText(entry.ignored) : entry.name);
+        var label = checkable ? item.subItems[0] : item;
+        if (checkable) label.text = entry.name;
+        if (showKind) item.subItems[checkable ? 1 : 0].text = swatchKindLabel(entry.kind);
+        try { label.image = swatchPreviewImage(previewFor(entry)); } catch (imageError) { }
+    }
+
+    function updateHelp(item) {
+        if (!item) return;
+        var entry = entries[item.index];
+        if (!entry) return;
+        var help = entry.name;
+        if (showKind) {
+            var helpKey = entry.previewKind === 'gradient' ? 'swatchGradientPreviewHelp' :
+                entry.previewKind === 'unknown' ? 'swatchPreviewUnavailable' : 'swatchPreviewHelp';
+            help += '\n' + swatchKindLabel(entry.kind) + '\n' + uiText(helpKey);
+        }
+        if (checkable) help += '\n' + uiText('swatchCheckHelp');
+        list.helpTip = help;
+    }
+
+    function selectedItem() {
+        var item = list.selection;
+        return item && typeof item.index === 'number' && item.index >= 0 && item.index < entries.length ? item : null;
+    }
+
+    function activeItem() {
+        return selectedItem() || (lastIndex >= 0 && lastIndex < entries.length ? list.items[lastIndex] : null);
+    }
+
+    function clearSelection() {
+        updatingSelection = true;
+        try { list.selection = null; }
+        finally { updatingSelection = false; }
+    }
+
+    function cancelPendingCheck() {
+        // 押下中のSpaceは解放まで保持し、フォーカス復帰後のリピートでも再開しない。
+        spaceIndex = -1;
+        keyboardSelection = false;
+    }
+
+    function releaseSpace() {
+        spaceHeld = false;
+        spaceIndex = -1;
+    }
+
+    function setIgnored(item, value) {
+        if (!checkInputEnabled || !item) return false;
+        var entry = entries[item.index];
+        value = !!value;
+        if (!entry || !!entry.ignored === value) return false;
+        updatingSelection = true;
+        try {
+            item.text = checkText(value);
+            entry.ignored = value;
+        } finally { updatingSelection = false; }
+        return true;
+    }
+
+    list.onChange = function () {
+        if (updatingSelection || (checkable && !checkInputEnabled)) return;
+        var fromKeyboard = keyboardSelection || (spaceHeld && spaceIndex >= 0);
+        keyboardSelection = false;
+        var item = selectedItem();
+        lastIndex = item ? item.index : -1;
+        if (item) updateHelp(item);
+        else list.helpTip = checkable ? uiText('swatchCheckHelp') : '';
+        if (spaceIndex >= 0 && (!item || item.index !== spaceIndex)) cancelPendingCheck();
+        if (checkable && item && !fromKeyboard) {
+            // 通常クリックで届く選択通知を使う。同じ行の再クリックに備えて選択を解除する。
+            setIgnored(item, !entries[item.index].ignored);
+            clearSelection();
+        }
+    };
+
+    if (checkable) {
+        list.helpTip = uiText('swatchCheckHelp');
+        function isSpaceEvent(event) {
+            var key = String(event.keyName || event.keyIdentifier || '');
+            return key === 'Space' || key === 'U+0020' || key === ' ';
+        }
+        function hasModifiers(event) {
+            return event.shiftKey || event.ctrlKey || event.altKey || event.metaKey;
+        }
+        function isMoveKey(key) {
+            return key === 'Up' || key === 'Down' || key === 'PageUp' || key === 'PageDown';
+        }
+        // 対象自身のcaptureではなく、実機で通知を確認した親Windowでキーを受ける。
+        var ownerWindow = list.window;
+        ownerWindow.addEventListener('keydown', function (event) {
+            if (!checkInputEnabled) return;
+            var key = String(event.keyName || event.keyIdentifier || '');
+            if (event.target !== list) {
+                if (key === 'Tab') { cancelPendingCheck(); keyboardSelection = true; }
+                return;
+            }
+            if (!isSpaceEvent(event) || hasModifiers(event)) {
+                cancelPendingCheck();
+                keyboardSelection = true;
+                if (isMoveKey(key) && !selectedItem() && lastIndex >= 0) {
+                    updatingSelection = true;
+                    try { list.selection = list.items[lastIndex]; }
+                    finally { updatingSelection = false; }
+                }
+                return;
+            }
+            event.preventDefault();
+            keyboardSelection = true;
+            if (spaceHeld) return;
+            spaceHeld = true;
+            var item = activeItem();
+            spaceIndex = item ? item.index : -1;
+            spaceValue = item ? !entries[item.index].ignored : false;
+        }, true);
+        ownerWindow.addEventListener('keyup', function (event) {
+            if (!isSpaceEvent(event)) {
+                keyboardSelection = false;
+                return;
+            }
+            keyboardSelection = false;
+            if (!checkInputEnabled || event.target !== list || hasModifiers(event)) { releaseSpace(); return; }
+            event.preventDefault();
+            if (!spaceHeld || spaceIndex < 0) { releaseSpace(); return; }
+            var item = activeItem();
+            var apply = item && item.index === spaceIndex;
+            var value = spaceValue;
+            releaseSpace();
+            if (apply) {
+                setIgnored(item, value);
+                lastIndex = item.index;
+                clearSelection();
+            }
+        }, true);
+        list.onDeactivate = cancelPendingCheck;
+        // 親パネルを閉じる場合も、選択状態を変えずに入力だけを取り消す。
+        list.cancelPendingCheck = cancelPendingCheck;
+        list.setCheckInputEnabled = function (enabled) {
+            checkInputEnabled = !!enabled;
+            cancelPendingCheck();
+            if (checkInputEnabled) {
+                var item = activeItem();
+                if (item) updateHelp(item);
+                else list.helpTip = uiText('swatchCheckHelp');
+            }
+        };
+    }
+    // スクロール・選択・描画は標準ListBoxに任せ、再描画の回避処理を加えない。
+    return list;
+}
+
+function createIgnoredSwatchList(panel, catalog, width, height) {
+    panel.orientation = 'column';
+    panel.alignChildren = ['fill', 'top'];
+    panel.margins = [10, 20, 10, 10];
+    panel.spacing = 6;
+    var message = '';
+    if (catalog.failed) message = uiText('swatchListReadFailed');
+    else if (catalog.entries.length === 0) message = uiText('noLinkedSwatches');
+    else if (catalog.failures > 0) message = uiFormat('swatchListPartial', { count: catalog.failures });
+    if (message) {
+        var status = panel.add('statictext', undefined, message, { multiline: true });
+        status.preferredSize = [width - 20, 34];
+    }
+    if (catalog.entries.length === 0) return null;
+    return createSwatchList(panel, catalog.entries, width - 20, height - 34 - (message ? 40 : 0), true, true);
+}
+
+function showConvertOptionsDialog(stats, doc) {
     var targetCount = stats.selectedObjectCount + stats.unsupportedObjectCount;
     var plannedCount = stats.planned;
     var dialogMinWidth = 280;
     var dlg = new Window('dialog', uiText('optionsTitle'));
-    dlg.orientation = 'column';
-    dlg.alignChildren = 'fill';
+    var columnSpacing = dlg.spacing;
+    dlg.orientation = 'row';
+    dlg.alignChildren = ['left', 'top'];
+    dlg.spacing = 0;
     dlg.preferredSize.width = dialogMinWidth;
+    var leftColumn = dlg.add('group');
+    leftColumn.orientation = 'column';
+    leftColumn.alignChildren = 'fill';
+    leftColumn.alignment = ['left', 'top'];
+    leftColumn.margins = 0;
+    leftColumn.spacing = columnSpacing;
 
     var optionPanelWidth = dialogMinWidth - 36;
     var optionPanelMargins = [8, 18, 28, 14];
@@ -777,7 +1205,7 @@ function showConvertOptionsDialog(stats) {
     var allowedColorDifferenceLabelExtraWidth = 72;
     var balanceOptionIndent = balanceSideLabelWidth - 18;
 
-    var satPanel = dlg.add('panel', undefined, uiText('saturationBoost'));
+    var satPanel = leftColumn.add('panel', undefined, uiText('saturationBoost'));
     satPanel.alignment = 'fill';
     satPanel.alignChildren = ['left', 'center'];
     satPanel.orientation = 'column';
@@ -805,7 +1233,7 @@ function showConvertOptionsDialog(stats) {
     ddSat.helpTip = uiText('saturationAmountHelp');
     var satToggleTargets = [ddSat];
 
-    var balancePanel = dlg.add('panel', undefined, uiText('cmyKBalance'));
+    var balancePanel = leftColumn.add('panel', undefined, uiText('cmyKBalance'));
     balancePanel.alignment = 'fill';
     balancePanel.orientation = 'column';
     balancePanel.alignChildren = ['left', 'center'];
@@ -900,7 +1328,6 @@ function showConvertOptionsDialog(stats) {
     chkProtectLightColors.value = false;
     chkProtectLightColors.helpTip = uiText('protectLightColorsHelp');
 
-    var enableDynamicDialogLayout = false;
     function updateBalanceToleranceDisplay() {
         var balanceValue = snapToStep(readSliderInt(sliderCMYKBalance, 0), balanceSliderStep, -100, 100);
         var isActive = balanceValue !== 0;
@@ -911,11 +1338,6 @@ function showConvertOptionsDialog(stats) {
         if (!enableKBoost) chkKBoost.value = false;
         chkProtectLightColors.enabled = enableProtectLightColors;
         if (!enableProtectLightColors) chkProtectLightColors.value = false;
-        if (enableDynamicDialogLayout) {
-            try {
-                dlg.layout.layout(true);
-            } catch (e) { }
-        }
     }
 
     function updateEnabled() {
@@ -924,7 +1346,7 @@ function showConvertOptionsDialog(stats) {
     chkSatBoost.onClick = updateEnabled;
 
     // 変換後の色処理と未適用オブジェクト選択オプション
-    var optionPanel = dlg.add('panel', undefined, uiText('optionGroup'));
+    var optionPanel = leftColumn.add('panel', undefined, uiText('optionGroup'));
     optionPanel.alignment = 'fill';
     optionPanel.orientation = 'column';
     optionPanel.alignChildren = ['left', 'center'];
@@ -949,8 +1371,13 @@ function showConvertOptionsDialog(stats) {
     chkSelectSkippedObjects.value = true;
     chkSelectSkippedObjects.helpTip = uiText('selectSkippedObjectsHelp');
 
+    var chkIgnoreSwatches = optionPanel.add('checkbox', undefined, uiText('ignoreSpecifiedSwatches'));
+    chkIgnoreSwatches.alignment = ['left', 'center'];
+    chkIgnoreSwatches.value = false;
+    chkIgnoreSwatches.helpTip = uiText('ignoreSpecifiedSwatchesHelp');
+
     // 対象数と予測最大時間
-    var infoPanel = dlg.add('panel', undefined, uiText('info'));
+    var infoPanel = leftColumn.add('panel', undefined, uiText('info'));
     infoPanel.alignment = 'fill';
     infoPanel.orientation = 'column';
     infoPanel.alignChildren = ['left', 'center'];
@@ -991,7 +1418,7 @@ function showConvertOptionsDialog(stats) {
     if (estimateSec >= 60) setStaticTextRed(estimateText);
 
     // ボタン
-    var btnGroup = dlg.add('group');
+    var btnGroup = leftColumn.add('group');
     btnGroup.alignment = 'right';
     var versionText = dialogVersionText();
     if (versionText) {
@@ -1015,14 +1442,68 @@ function showConvertOptionsDialog(stats) {
         enableKBoost: false,
         enableLightColorProtect: false,
         avoidAutoBlackOverprint: DEFAULT_AVOID_AUTO_BLACK_OVERPRINT_ENABLED,
-        selectSkippedObjects: true
+        selectSkippedObjects: true,
+        ignoredSwatches: []
     };
+
+    var compactSize = null;
+    var leftSize = null;
+    var swatchPanel = null;
+    var swatchCatalog = null;
+    var swatchList = null;
+    var expandedGap = 12;
+    function rememberCompactSize() {
+        if (compactSize) return;
+        compactSize = [dlg.size.width, dlg.size.height];
+        leftSize = [leftColumn.size.width, leftColumn.size.height];
+        leftColumn.preferredSize = leftSize;
+        leftColumn.minimumSize = leftSize;
+        leftColumn.maximumSize = leftSize;
+    }
+    function updateSwatchPanel() {
+        rememberCompactSize();
+        var expanded = chkIgnoreSwatches.value;
+        var listWidth = Math.round((compactSize[0] - expandedGap - 20) * 1.5);
+        var panelWidth = listWidth + 20;
+        var position = [dlg.location.x, dlg.location.y];
+        if (expanded && !swatchPanel) {
+            swatchCatalog = readIgnoredSwatchCatalog(doc || app.activeDocument);
+            swatchPanel = dlg.add('panel', undefined, uiText('ignoredSwatchList'));
+            swatchPanel.alignment = ['left', 'top'];
+            swatchList = createIgnoredSwatchList(swatchPanel, swatchCatalog, panelWidth, leftSize[1]);
+        }
+        if (swatchList) swatchList.setCheckInputEnabled(expanded);
+        if (swatchPanel) {
+            var panelSize = expanded ? [panelWidth, leftSize[1]] : [0, 0];
+            swatchPanel.visible = expanded;
+            swatchPanel.minimumSize = [0, 0];
+            swatchPanel.maximumSize = panelSize;
+            swatchPanel.preferredSize = panelSize;
+            swatchPanel.minimumSize = panelSize;
+        }
+        var size = [expanded ? compactSize[0] + expandedGap + panelWidth : compactSize[0], compactSize[1]];
+        dlg.spacing = expanded ? expandedGap : 0;
+        dlg.minimumSize = [0, 0];
+        dlg.maximumSize = size;
+        dlg.minimumSize = size;
+        dlg.preferredSize = size;
+        dlg.layout.layout(true);
+        dlg.size = size;
+        dlg.layout.resize();
+        dlg.location = position;
+    }
+    dlg.onShow = rememberCompactSize;
+    dlg.onDeactivate = function () { if (swatchList) swatchList.cancelPendingCheck(); };
+    dlg.onClose = function () { if (swatchList) swatchList.setCheckInputEnabled(false); };
+    chkIgnoreSwatches.onClick = updateSwatchPanel;
 
     updateEnabled();
     updateBalanceToleranceDisplay();
-    enableDynamicDialogLayout = true;
+    dlg.layout.layout(true);
 
-    var ret = dlg.show();
+    var ret;
+    try { ret = dlg.show(); }
+    finally { if (swatchList) swatchList.setCheckInputEnabled(false); }
     if (ret !== 1) {
         return result; // ok=false のまま返す
     }
@@ -1036,6 +1517,14 @@ function showConvertOptionsDialog(stats) {
     result.enableLightColorProtect = result.cmyKBalanceValue > 0 && chkProtectLightColors.value;
     result.avoidAutoBlackOverprint = chkAvoidAutoBlackOverprint.value;
     result.selectSkippedObjects = chkSelectSkippedObjects.value;
+    if (chkIgnoreSwatches.value && swatchCatalog) {
+        for (var si = 0; si < swatchCatalog.entries.length; si++) {
+            var swatch = swatchCatalog.entries[si];
+            if (swatch.ignored) result.ignoredSwatches.push({
+                key: swatch.key, kind: swatch.kind, name: swatch.name, preview: swatch.preview
+            });
+        }
+    }
     return result;
 }
 
@@ -1102,8 +1591,14 @@ var processedSpotMap = {};
 var processedGradientMap = {};
 var spotReferenceKeys = [];
 var gradientReferenceKeys = [];
+var ignoredSwatchRules = null;
+var swatchPreviewCRCTable = null;
 var pendingSpotRenames = [];
 var spotRenameSkippedCount = 0;
+var createdColorResources = [];
+var colorDocument = null;
+var opacityStateCache = {};
+var opacityReferenceKeys = [];
 var autoBlackOverprintState = createAutoBlackOverprintState();
 var CMYK_SWATCH_NAME_PATTERN = /^[ \t]*C[ \t]*=[ \t]*(\d+(?:\.\d+)?)[ \t]+M[ \t]*=[ \t]*(\d+(?:\.\d+)?)[ \t]+Y[ \t]*=[ \t]*(\d+(?:\.\d+)?)[ \t]+K[ \t]*=[ \t]*(\d+(?:\.\d+)?)(?:[ \t]+\(([\s\S]*)\))?[ \t]*$/;
 
@@ -1138,8 +1633,206 @@ function gradientKey(gradient) {
     return hostCollectionObjectKey(gradient, 'gradient', gradientReferenceKeys);
 }
 
+function readIgnoredSwatchCatalog(doc) {
+    var result = { entries: [], failures: 0, failed: false };
+    var swatches;
+    var count;
+    try {
+        swatches = doc.swatches;
+        count = swatches.length;
+        if (typeof count !== 'number' || !isFinite(count) || count < 0) throw new Error('Invalid swatch collection');
+    } catch (e) {
+        result.failed = true;
+        return result;
+    }
+    var seen = {};
+    for (var i = 0; i < count; i++) {
+        try {
+            var swatch = swatches[i];
+            var color = swatch.color;
+            if (!color) continue;
+            var type = String(color.typename);
+            var reference;
+            var key;
+            var kind;
+            if (type === 'SpotColor') {
+                reference = color.spot;
+                if (reference.colorType === ColorModel.PROCESS) kind = 'global';
+                else if (reference.colorType === ColorModel.SPOT) kind = 'spot';
+                else continue;
+                key = spotKey(reference);
+            } else if (type === 'GradientColor') {
+                reference = color.gradient;
+                kind = 'gradient';
+                key = gradientKey(reference);
+            } else {
+                continue;
+            }
+            if (!key || seen[key]) continue;
+            var name = kind === 'global' || kind === 'spot' ? reference.name : swatch.name;
+            if (typeof name !== 'string') throw new Error('Swatch name unavailable');
+            seen[key] = true;
+            result.entries.push({ key: key, kind: kind, name: name, reference: reference, ignored: false });
+        } catch (readError) {
+            result.failures++;
+        }
+    }
+    return result;
+}
+
+function createIgnoredSwatchRules(entries) {
+    if (!entries || entries.length === 0) return null;
+    var rules = { keys: {}, entries: [], matchedKeys: {}, unmatchedCount: 0,
+        hasSpots: false, gradientMatches: {}, ignoredCount: 0 };
+    for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i];
+        if (!rules.keys[entry.key]) {
+            rules.keys[entry.key] = true;
+            rules.entries.push({ key: entry.key, name: entry.name, preview: entry.preview });
+            rules.unmatchedCount++;
+        }
+        if (entry.kind === 'global' || entry.kind === 'spot') rules.hasSpots = true;
+    }
+    return rules;
+}
+
+function recordIgnoredSwatchMatch(key, rules) {
+    if (!rules.keys[key]) return false;
+    if (!rules.matchedKeys[key]) {
+        rules.matchedKeys[key] = true;
+        rules.unmatchedCount--;
+    }
+    return true;
+}
+
+function collectIgnoredSwatches(rules) {
+    var swatches = [];
+    if (!rules) return swatches;
+    for (var i = 0; i < rules.entries.length; i++) {
+        var entry = rules.entries[i];
+        if (rules.matchedKeys[entry.key] && typeof entry.name === 'string') {
+            swatches.push({ name: entry.name, preview: entry.preview });
+        }
+    }
+    return swatches;
+}
+
+function ignoredGradientDecision(gradient, key, rules) {
+    if (!rules.hasSpots) return null;
+    if (typeof rules.gradientMatches[key] !== 'undefined') return rules.gradientMatches[key];
+    var decision = null;
+    try {
+        var stops = gradient.gradientStops;
+        var count = stops.length;
+        if (typeof count !== 'number' || !isFinite(count) || count < 2) throw new Error('Gradient stops unavailable');
+        for (var i = 0; i < count; i++) {
+            checkpointProgress();
+            try {
+                var color = stops[i].color;
+                if (color && color.typename === 'SpotColor' && recordIgnoredSwatchMatch(spotKey(color.spot), rules)) {
+                    decision = 'ignore';
+                    if (rules.unmatchedCount === 0) break;
+                }
+            } catch (stopError) {
+                if (isUserCancelledError(stopError)) throw stopError;
+                if (decision !== 'ignore') decision = 'gradientStopFailed';
+            }
+        }
+    } catch (e) {
+        if (isUserCancelledError(e)) throw e;
+        if (decision !== 'ignore') decision = 'gradientStopFailed';
+    }
+    rules.gradientMatches[key] = decision;
+    return decision;
+}
+
+function ignoredPaintDecision(source, rules) {
+    if (source.reason) return source.reason;
+    var color = source.color;
+    if (!color) return null;
+    try {
+        if (source.typeName === 'SpotColor') {
+            return recordIgnoredSwatchMatch(spotKey(color.spot), rules) ? 'ignore' : null;
+        }
+        if (source.typeName === 'GradientColor') {
+            var gradient = color.gradient;
+            var key = gradientKey(gradient);
+            var matchedDefinition = recordIgnoredSwatchMatch(key, rules);
+            if (matchedDefinition && rules.unmatchedCount === 0) return 'ignore';
+            var stopDecision = ignoredGradientDecision(gradient, key, rules);
+            return matchedDefinition ? 'ignore' : stopDecision;
+        }
+    } catch (e) {
+        if (isUserCancelledError(e)) throw e;
+        return 'colorReadFailed';
+    }
+    return null;
+}
+
+function ignoredObjectDecision(prepared, rules) {
+    var failure = null;
+    var matched = false;
+    for (var i = 0; i < prepared.length; i++) {
+        var task = prepared[i];
+        if (task.reason && !failure) failure = task.reason;
+        for (var p = 0; p < task.paints.length; p++) {
+            var decision = ignoredPaintDecision(task.paints[p].source, rules);
+            if (decision === 'ignore') {
+                matched = true;
+                if (rules.unmatchedCount === 0) return decision;
+            } else if (decision && !failure) {
+                failure = decision;
+            }
+        }
+    }
+    return matched ? 'ignore' : failure;
+}
+
 function markProcessedSpot(key, state) {
     if (key) processedSpotMap[key] = state;
+}
+
+function trackColorResource(value, dependencies) {
+    var record = { value: value, uses: 0, keep: false, dependencies: dependencies || [] };
+    createdColorResources.push(record);
+    return record;
+}
+
+function retainColorResource(record) {
+    if (!record) return;
+    record.uses++;
+    if (record.uses !== 1) return;
+    for (var i = 0; i < record.dependencies.length; i++) {
+        retainColorResource(record.dependencies[i]);
+    }
+}
+
+function releaseColorResource(record) {
+    if (!record || record.uses === 0) return;
+    record.uses--;
+    if (record.uses !== 0) return;
+    for (var i = 0; i < record.dependencies.length; i++) {
+        releaseColorResource(record.dependencies[i]);
+    }
+}
+
+function preserveColorResource(record) {
+    if (!record || record.keep) return;
+    // 代入が例外になった場合、ホストが途中まで反映した可能性を考慮する。
+    record.keep = true;
+    for (var i = 0; i < record.dependencies.length; i++) {
+        preserveColorResource(record.dependencies[i]);
+    }
+}
+
+function removeUnusedColorResources() {
+    for (var i = createdColorResources.length - 1; i >= 0; i--) {
+        var record = createdColorResources[i];
+        if (record.uses === 0 && !record.keep) {
+            try { record.value.remove(); } catch (e) { }
+        }
+    }
+    createdColorResources = [];
 }
 
 function buildGlobalCMYKSwatchName(originalName, cmyk) {
@@ -1158,14 +1851,15 @@ function buildGlobalCMYKSwatchName(originalName, cmyk) {
     return name + ' (' + originalName + ')';
 }
 
-function queueSpotRename(spot, originalName, cmyk) {
-    if (typeof originalName !== 'string') {
+function queueSpotRename(spot, originalName, cmyk, sourceName, resource) {
+    if (arguments.length < 4) sourceName = originalName;
+    if (typeof originalName !== 'string' || typeof sourceName !== 'string') {
         spotRenameSkippedCount++;
         return;
     }
-    var newName = buildGlobalCMYKSwatchName(originalName, cmyk);
+    var newName = buildGlobalCMYKSwatchName(sourceName, cmyk);
     if (newName === originalName) return;
-    pendingSpotRenames.push({ spot: spot, originalName: originalName, newName: newName });
+    pendingSpotRenames.push({ spot: spot, originalName: originalName, newName: newName, resource: resource });
 }
 
 function readSwatchNameCounts(doc) {
@@ -1190,7 +1884,11 @@ function restoreSpotName(task) {
 }
 
 function applyPendingSpotRenames(doc) {
-    var tasks = pendingSpotRenames;
+    var tasks = [];
+    for (var p = 0; p < pendingSpotRenames.length; p++) {
+        var pending = pendingSpotRenames[p];
+        if (!pending.resource || pending.resource.uses > 0 || pending.resource.keep) tasks.push(pending);
+    }
     pendingSpotRenames = [];
     if (tasks.length === 0) return;
 
@@ -1265,7 +1963,13 @@ function verifyAutoBlackOverprintSpot(spot) {
 
 function isAutoBlackOverprintSwatchName(name) {
     var names = UI_TEXT.autoBlackOverprintSwatchName;
-    return name === names.ja || name === names.en;
+    if (name === names.ja || name === names.en) return true;
+    if (typeof name !== 'string') return false;
+    var bases = [names.ja, names.en];
+    for (var i = 0; i < bases.length; i++) {
+        if (name.indexOf(bases[i]) === 0 && /^ \([1-9]\d*\)$/.test(name.substring(bases[i].length))) return true;
+    }
+    return false;
 }
 
 function isAutoBlackOverprintDefinition(name, cmyk) {
@@ -1296,75 +2000,100 @@ function readSolidProcessCMYK(color) {
 
 function readFullyOpaqueState(item) {
     // 1: 全階層100%、0: 半透明、-1: 取得できず判定不可。
+    var trail = [];
+    var seen = {};
+    var state = -1;
+    var depth = 0;
     try {
-        for (var depth = 0; item && depth < 1000; depth++) {
-            if (item.typename === 'Document') return 1;
+        while (item) {
+            if (++depth % 100 === 0) checkpointProgress();
+            if (item.typename === 'Document') { state = 1; break; }
+            var key = artItemKey(item, opacityReferenceKeys);
+            if (typeof opacityStateCache[key] !== 'undefined') { state = opacityStateCache[key]; break; }
+            if (seen[key]) break;
+            seen[key] = true;
+            trail.push(key);
             var opacity = item.opacity;
-            if (typeof opacity !== 'number' || !isFinite(opacity)) return -1;
-            if (opacity !== 100) return 0;
+            if (typeof opacity !== 'number' || !isFinite(opacity)) break;
+            if (opacity !== 100) { state = 0; break; }
             item = item.parent;
         }
-    } catch (e) { }
-    return -1;
+    } catch (e) { if (isUserCancelledError(e)) throw e; }
+    for (var i = 0; i < trail.length; i++) opacityStateCache[trail[i]] = state;
+    return state;
 }
 
 function createAutoBlackOverprintState() {
-    return { tasks: [], spot: null, spotChecked: false, spotFailureReason: null, colorApplied: false };
+    return { tasks: [], spot: null, resource: null, spotChecked: false, spotFailureReason: null, colorApplied: false };
 }
 
-function queueAutoBlackOverprintTask(target, propName, entry, alreadyChanged) {
+function queueAutoBlackOverprintTask(target, propName, entry, alreadyChanged, convertedResource, selectionTask) {
     var isText = entry.typeName === 'TextFrame';
     var overprintPropName = propName === 'fillColor' ?
         (isText ? 'overprintFill' : 'fillOverprint') :
         (isText ? 'overprintStroke' : 'strokeOverprint');
-    autoBlackOverprintState.tasks.push({
+    var task = {
         target: target,
         propName: propName,
         overprintPropName: overprintPropName,
-        entry: entry,
-        alreadyChanged: alreadyChanged
-    });
+        alreadyChanged: alreadyChanged,
+        convertedResource: convertedResource
+    };
+    if (isText && selectionTask && selectionTask.kind === 'textRun') {
+        // 属性参照は保持せず、既存の開始・終了位置から後処理の直前に取得する。
+        task.textRun = selectionTask;
+        task.target = null;
+    }
+    if (entry.workList) {
+        // 作業用記録は次の対象で再利用するため、後処理には一覧と添字を渡す。
+        task.workList = entry.workList;
+        task.workIndex = entry.workIndex;
+    } else {
+        task.entry = entry;
+    }
+    autoBlackOverprintState.tasks.push(task);
 }
 
 function getAutoBlackOverprintSpot(doc) {
     if (autoBlackOverprintState.spotChecked) return autoBlackOverprintState.spot;
     autoBlackOverprintState.spotChecked = true;
     var createdSpot = null;
-    var updatedSpot = null;
-    var previousColor = null;
     var failureReason = 'autoBlackOverprintReadFailed';
     try {
         var definition = AUTO_BLACK_OVERPRINT_CMYK;
         var name = uiText('autoBlackOverprintSwatchName');
         var swatches = doc.swatches;
         var nameConflict = false;
+        var legacyNameConflict = false;
+        var names = {};
         for (var i = 0, n = swatches.length; i < n; i++) {
             var swatch = swatches[i];
             var swatchName = swatch.name;
+            names['swatch:' + swatchName] = true;
             if (swatchName === name) nameConflict = true;
             if (!isAutoBlackOverprintSwatchName(swatchName)) continue;
             var color = swatch.color;
             if (!color || color.typename !== 'SpotColor') continue;
             var cmyk = readSolidProcessCMYK(color);
             if (cmyk && isAutoBlackOverprintDefinition(swatchName, cmyk)) {
-                var existingSpot = color.spot;
                 if (!hasMinimumAutoBlackOverprintYellow(cmyk)) {
-                    // 旧版で保存したY1の微小誤差も識別し、実値が1%以上になるよう補正する。
-                    previousColor = makeCMYK(cmyk.c, cmyk.m, cmyk.y, cmyk.k);
-                    updatedSpot = existingSpot;
-                    failureReason = 'autoBlackOverprintUpdateFailed';
-                    existingSpot.color = makeCMYK(definition.c, definition.m, definition.y, definition.k);
-                    failureReason = 'autoBlackOverprintVerifyFailed';
-                    verifyAutoBlackOverprintSpot(existingSpot);
+                    if (swatchName === name) legacyNameConflict = true;
+                    continue;
                 }
-                autoBlackOverprintState.spot = existingSpot;
+                autoBlackOverprintState.spot = color.spot;
                 return autoBlackOverprintState.spot;
             }
         }
         // 同名の別の色を上書きしない。失敗は未適用として報告する。
-        if (nameConflict) {
+        if (nameConflict && !legacyNameConflict) {
             autoBlackOverprintState.spotFailureReason = 'autoBlackOverprintNameConflict';
             return null;
+        }
+        // 旧版のY1は新しい定義へ置き換え、選択した使用箇所に適用する。
+        if (legacyNameConflict) {
+            var suffix = 2;
+            var baseName = name;
+            do { name = baseName + ' (' + suffix++ + ')'; } while (names['swatch:' + name]);
         }
         failureReason = 'autoBlackOverprintCreateFailed';
         createdSpot = doc.spots.add();
@@ -1375,14 +2104,12 @@ function getAutoBlackOverprintSpot(doc) {
         failureReason = 'autoBlackOverprintVerifyFailed';
         verifyAutoBlackOverprintSpot(createdSpot);
         autoBlackOverprintState.spot = createdSpot;
+        autoBlackOverprintState.resource = trackColorResource(createdSpot);
         return autoBlackOverprintState.spot;
     } catch (e) {
         autoBlackOverprintState.spotFailureReason = failureReason;
         if (createdSpot) {
             try { createdSpot.remove(); } catch (removeError) { }
-        }
-        if (updatedSpot && previousColor) {
-            try { updatedSpot.color = previousColor; } catch (restoreError) { }
         }
         return null;
     }
@@ -1396,8 +2123,17 @@ function clearPaintOverprint(task) {
     return true;
 }
 
-function applyAutoBlackOverprintTask(task, doc) {
-    var entry = task.entry;
+function autoBlackTaskEntry(task, scratch) {
+    if (!task.workList) return task.entry;
+    return loadSelectionWorkEntry(task.workList, task.workIndex, scratch);
+}
+
+function applyAutoBlackOverprintTask(task, doc, entry) {
+    entry = entry || autoBlackTaskEntry(task);
+    if (task.textRun) {
+        task.target = readTextTaskAttributes(entry, task.textRun);
+        if (!task.target) return makeColorProcessResult(false, 'textAttributesReadFailed');
+    }
     var cmyk;
     var dedicatedColor;
     var alreadyProtected;
@@ -1414,6 +2150,7 @@ function applyAutoBlackOverprintTask(task, doc) {
     if (!cmyk || (!isK100CMYK(cmyk) && !dedicatedColor)) return makeColorProcessResult(false);
     if (typeof entry.autoBlackOverprintOpacityState === 'undefined') {
         entry.autoBlackOverprintOpacityState = readFullyOpaqueState(entry.target);
+        if (entry.workList) entry.workList.opacityStates[entry.workIndex] = entry.autoBlackOverprintOpacityState;
     }
     if (entry.autoBlackOverprintOpacityState !== 1) {
         return makeColorProcessResult(false, entry.autoBlackOverprintOpacityState < 0 ? 'opacityReadFailed' : null);
@@ -1427,9 +2164,12 @@ function applyAutoBlackOverprintTask(task, doc) {
             color.spot = spot;
             color.tint = 100;
             task.target[task.propName] = color;
+            retainColorResource(autoBlackOverprintState.resource);
+            releaseColorResource(task.convertedResource);
             paintChanged = true;
             autoBlackOverprintState.colorApplied = true;
         } catch (e2) {
+            preserveColorResource(autoBlackOverprintState.resource);
             return makeColorProcessResult(false, 'autoBlackOverprintFailed');
         }
     }
@@ -1447,11 +2187,13 @@ function applyAutoBlackOverprint(doc) {
     if (!AVOID_AUTO_BLACK_OVERPRINT_ENABLED) return 0;
     var tasks = autoBlackOverprintState.tasks;
     var addedChanges = 0;
+    var scratch = createSelectionArtItemRecord(null, '', null);
     for (var i = 0, n = tasks.length; i < n; i++) {
         checkpointProgress(); // 更新間隔の制御はcheckpoint内で行う。
         var task = tasks[i];
-        var result = applyAutoBlackOverprintTask(task, doc);
-        if (result.reason) countSkip(task.entry, result.reason);
+        var entry = autoBlackTaskEntry(task, scratch);
+        var result = applyAutoBlackOverprintTask(task, doc, entry);
+        if (result.reason) countSkip(entry, result.reason);
         if (result.changed && !task.alreadyChanged) addedChanges++;
     }
     autoBlackOverprintState.tasks = [];
@@ -2471,7 +3213,7 @@ function makeColorProcessResult(changed, reason, out, spot) {
     };
     if (reason) res.reason = reason;
     if (out) res.out = out;
-    if (spot) res.spot = true;
+    if (spot) res.spot = spot;
     return res;
 }
 
@@ -2534,7 +3276,8 @@ function buildAdjustedColorResult(orig) {
 
 function processedSpotStateResult(state) {
     if (!state) return null;
-    return makeColorProcessResult(false, state.reason || 'spotAlreadyProcessed');
+    if (typeof state.changed !== 'undefined') return state;
+    return makeColorProcessResult(false, state.reason);
 }
 
 function processSpotColorObject(sp, key, orig) {
@@ -2561,10 +3304,17 @@ function processSpotColorObject(sp, key, orig) {
     try {
         originalName = sp.name;
     } catch (nameReadError) { }
-    var convertedColor = makeCMYK(spotResult.out.c, spotResult.out.m, spotResult.out.y, spotResult.out.k);
+    var convertedSpot = null;
     try {
-        sp.color = convertedColor;
+        var doc = colorDocument || app.activeDocument;
+        convertedSpot = doc.spots.add();
+        convertedSpot.colorType = ColorModel.PROCESS;
+        convertedSpot.color = makeCMYK(spotResult.out.c, spotResult.out.m, spotResult.out.y, spotResult.out.k);
     } catch (e) {
+        if (convertedSpot) {
+            try { convertedSpot.remove(); } catch (removeError) { }
+        }
+        if (isUserCancelledError(e)) throw e;
         var failedState = {
             reason: 'spotWriteFailed'
         };
@@ -2572,11 +3322,14 @@ function processSpotColorObject(sp, key, orig) {
         return makeColorProcessResult(false, failedState.reason);
     }
 
-    markProcessedSpot(key, {
-        reason: null
-    });
-    queueSpotRename(sp, originalName, spotResult.out);
-    return makeColorProcessResult(true, null, spotResult.out, true);
+    var result = makeColorProcessResult(true, null, spotResult.out, convertedSpot);
+    result.resource = trackColorResource(convertedSpot);
+    markProcessedSpot(key, result);
+    markProcessedSpot(spotKey(convertedSpot), makeColorProcessResult(false, 'same'));
+    var assignedName = null;
+    try { assignedName = convertedSpot.name; } catch (nameError) { }
+    queueSpotRename(convertedSpot, assignedName, spotResult.out, originalName, result.resource);
+    return result;
 }
 
 function processSpotColor(color) {
@@ -2646,127 +3399,179 @@ function processColorObject(color, typeName) {
 function isIgnoredColorProcessReason(reason) {
     return !reason ||
         reason === 'same' ||
-        reason === 'spotAlreadyProcessed' ||
         reason === 'ignoredGray' ||
         reason === 'ignoredNoColor';
 }
 
-function recordSharedFailure(sharedState, reason) {
-    if (sharedState && reason && !sharedState.reason) sharedState.reason = reason;
+function makeReplacementColor(source, result) {
+    if (result.spot) {
+        var spotColor = new SpotColor();
+        spotColor.spot = result.spot;
+        spotColor.tint = source.tint;
+        return spotColor;
+    }
+    if (result.gradient) {
+        var gradientColor = new GradientColor();
+        gradientColor.gradient = result.gradient;
+        gradientColor.origin = [source.origin[0], source.origin[1]];
+        gradientColor.length = source.length;
+        gradientColor.angle = source.angle;
+        gradientColor.hiliteAngle = source.hiliteAngle;
+        gradientColor.hiliteLength = source.hiliteLength;
+        gradientColor.matrix = source.matrix;
+        return gradientColor;
+    }
+    return makeCMYK(result.out.c, result.out.m, result.out.y, result.out.k);
 }
 
-function applyColorResultToProperty(target, propName, res, entry, sharedState) {
-    if (!res || !res.changed) {
-        if (res && !isIgnoredColorProcessReason(res.reason)) {
-            countSkip(entry, res.reason);
-            recordSharedFailure(sharedState, res.reason);
-        }
-        return 0;
+function applyColorResultToProperty(target, propName, res, entry, sourceColor) {
+    if (res && !isIgnoredColorProcessReason(res.reason)) {
+        countSkip(entry, res.reason);
     }
-    if (res.spot) return 1;
-    var convertedColor = makeCMYK(res.out.c, res.out.m, res.out.y, res.out.k);
+    if (!res || !res.changed) return 0;
     try {
-        target[propName] = convertedColor;
+        target[propName] = makeReplacementColor(sourceColor, res);
+        retainColorResource(res.resource);
     } catch (e) {
+        preserveColorResource(res.resource);
+        if (isUserCancelledError(e)) throw e;
         countSkip(entry, 'colorWriteFailed');
-        recordSharedFailure(sharedState, 'colorWriteFailed');
         return 0;
     }
-    return 1;
+    return res.changes || 1;
 }
 
-function processColorPropertyCore(target, propName, allowGradient, entry) {
-    var col;
-    var typeName;
+function snapshotPaintColor(color, typeName) {
+    if (typeName === 'CMYKColor') {
+        return { typename: typeName, cyan: color.cyan, magenta: color.magenta,
+            yellow: color.yellow, black: color.black };
+    }
+    if (typeName === 'SpotColor') {
+        return { typename: typeName, spot: color.spot, tint: color.tint };
+    }
+    return color;
+}
+
+function readColorProperty(target, propName) {
     try {
-        col = target[propName];
-        typeName = col ? String(col.typename) : "";
+        var color = target[propName];
+        var typeName = color ? String(color.typename) : '';
+        return { color: snapshotPaintColor(color, typeName), typeName: typeName };
     } catch (e) {
+        if (isUserCancelledError(e)) throw e;
+        return { reason: 'colorReadFailed' };
+    }
+}
+
+function processColorPropertyCore(target, propName, allowGradient, entry, source, selectionTask) {
+    source = source || readColorProperty(target, propName);
+    if (source.reason) {
         countSkip(entry, 'colorReadFailed');
         return 0;
     }
+    var col = source.color;
+    var typeName = source.typeName;
     if (!col) return 0;
-    if (allowGradient && typeName === 'GradientColor') {
-        return processGradientColor(col, entry).changed;
-    }
-    var res = processColorObject(col, typeName);
-    var changed = applyColorResultToProperty(target, propName, res, entry, null);
+    var res = allowGradient && typeName === 'GradientColor' ?
+        processGradientColor(col) : processColorObject(col, typeName);
+    var changed = applyColorResultToProperty(target, propName, res, entry, col);
     if (AVOID_AUTO_BLACK_OVERPRINT_ENABLED &&
         (typeName === 'CMYKColor' || typeName === 'SpotColor' || typeName === 'GrayColor') &&
         (changed > 0 || (res && !res.changed && isIgnoredColorProcessReason(res.reason)))) {
         // 単色の使用箇所だけを保持する。共有グラデーションの停止点は変更しない。
-        queueAutoBlackOverprintTask(target, propName, entry, changed > 0);
+        queueAutoBlackOverprintTask(target, propName, entry, changed > 0, changed > 0 ? res.resource : null, selectionTask);
     }
     return changed;
 }
 
-// GradientColor を処理（各ストップの CMYK/SpotColor） - カウンタ集計
-function processGradientColor(gradColor, entry) {
+// 元の定義から変換済みの定義を作り、各使用箇所への適用時に参照数を数える。
+function processGradientColor(gradColor) {
     var g;
     var key;
     try {
         g = gradColor.gradient;
         key = gradientKey(g);
     } catch (e) {
-        countSkip(entry, 'gradientStopFailed');
-        return {
-            changed: 0
-        };
+        if (isUserCancelledError(e)) throw e;
+        return makeColorProcessResult(false, 'gradientStopFailed');
     }
     var priorState = key ? processedGradientMap[key] : null;
-    if (priorState) {
-        if (priorState.reason) countSkip(entry, priorState.reason);
-        return {
-            changed: 0
-        };
-    }
-
-    var sharedState = {
-        reason: null
-    };
-    var stops;
-    var stopCount;
+    if (priorState) return priorState;
+    var sourceStops = [];
+    var gradientType;
     try {
-        stops = g.gradientStops;
-        stopCount = stops.length;
+        gradientType = g.type;
+        var stops = g.gradientStops;
+        var stopCount = stops.length;
+        if (stopCount < 2) throw new Error('Gradient needs at least two stops');
+        for (var s = 0; s < stopCount; s++) {
+            checkpointProgress();
+            var stop = stops[s];
+            var stopColor = stop.color;
+            sourceStops.push({
+                color: stopColor, source: snapshotPaintColor(stopColor, stopColor ? String(stopColor.typename) : ''),
+                rampPoint: stop.rampPoint,
+                midPoint: stop.midPoint, opacity: stop.opacity
+            });
+        }
     } catch (e2) {
-        countSkip(entry, 'gradientStopFailed');
-        sharedState.reason = 'gradientStopFailed';
-        if (key) processedGradientMap[key] = sharedState;
-        return {
-            changed: 0
-        };
+        if (isUserCancelledError(e2)) throw e2;
+        var readFailure = makeColorProcessResult(false, 'gradientStopFailed');
+        if (key) processedGradientMap[key] = readFailure;
+        return readFailure;
     }
-
-    var changed = 0;
-    for (var i = 0; i < stopCount; i++) {
+    var changes = 0;
+    var reason = null;
+    var dependencies = [];
+    for (var i = 0; i < sourceStops.length; i++) {
         checkpointProgress();
-        var stop;
-        var col;
-        var typeName;
+        var sourceStop = sourceStops[i];
         try {
-            stop = stops[i];
-            col = stop.color;
-            typeName = col ? String(col.typename) : "";
-        } catch (e3) {
-            countSkip(entry, 'gradientStopFailed');
-            recordSharedFailure(sharedState, 'gradientStopFailed');
-            continue;
-        }
-        if (col) {
-            changed += applyColorResultToProperty(
-                stop,
-                'color',
-                processColorObject(col, typeName),
-                entry,
-                sharedState
-            );
+            var converted = processColorObject(sourceStop.source);
+            if (!reason && !isIgnoredColorProcessReason(converted.reason)) reason = converted.reason;
+            if (converted.changed) {
+                sourceStop.color = makeReplacementColor(sourceStop.source, converted);
+                if (converted.resource) dependencies.push(converted.resource);
+                changes++;
+            }
+        } catch (colorError) {
+            if (isUserCancelledError(colorError)) throw colorError;
+            if (!reason) reason = 'gradientStopFailed';
         }
     }
-    if (key) processedGradientMap[key] = sharedState;
-    return {
-        changed: changed
-    };
+    var result = makeColorProcessResult(false, reason);
+    var gradient = null;
+    if (changes > 0) {
+        try {
+            var doc = colorDocument || app.activeDocument;
+            gradient = doc.gradients.add();
+            gradient.type = gradientType;
+            var destinationStops = gradient.gradientStops;
+            while (destinationStops.length < sourceStops.length) destinationStops.add();
+            for (var d = 0; d < sourceStops.length; d++) {
+                checkpointProgress();
+                var destination = destinationStops[d];
+                var original = sourceStops[d];
+                destination.rampPoint = original.rampPoint;
+                destination.midPoint = original.midPoint;
+                destination.opacity = original.opacity;
+                destination.color = original.color;
+            }
+            result = makeColorProcessResult(true, reason);
+            result.gradient = gradient;
+            result.changes = changes;
+            result.resource = trackColorResource(gradient, dependencies);
+            processedGradientMap[gradientKey(gradient)] = makeColorProcessResult(false, 'same');
+        } catch (e3) {
+            if (gradient) {
+                try { gradient.remove(); } catch (removeError) { }
+            }
+            if (isUserCancelledError(e3)) throw e3;
+            result = makeColorProcessResult(false, 'gradientWriteFailed');
+        }
+    }
+    if (key) processedGradientMap[key] = result;
+    return result;
 }
 
 function makeTextSubRange(tf, startIndex, endIndex) {
@@ -2852,25 +3657,6 @@ function collectTextRunSpecs(tf, heartbeat) {
     return runs;
 }
 
-function addPathPaintTask(entry, target, stateProp, colorProp, errorReason) {
-    try {
-        if (target[stateProp]) {
-            entry.tasks.push({
-                kind: 'colorProperty',
-                propName: colorProp,
-                allowGradient: true,
-                steps: 1
-            });
-        }
-    } catch (e) {
-        entry.tasks.push({
-            kind: 'scanFailure',
-            reason: errorReason,
-            steps: 1
-        });
-    }
-}
-
 function addTextColorTasks(entry, tf, heartbeat) {
     var runs = collectTextRunSpecs(tf, heartbeat);
     if (!runs) {
@@ -2891,135 +3677,576 @@ function addTextColorTasks(entry, tf, heartbeat) {
     }
 }
 
-function walkSelectionArtItems(visitor, unsupportedVisitor) {
-    var doc;
-    var sel;
-    var nSel;
-    try {
-        doc = app.activeDocument;
-        sel = doc.selection;
-        nSel = sel ? sel.length : 0;
-    } catch (e) {
-        throw e;
-    }
-    if (nSel === 0) return false;
+function walkSelectionArtItems(visitor, unsupportedVisitor, heartbeat) {
+    var doc = app.activeDocument;
+    var selection = doc.selection;
+    var count = selection ? selection.length : 0;
+    if (count === 0) return false;
+    var references = [];
+    // 1: 訪問済み、2: 処理対象へ登録済み、4: 未対応として登録済み。
+    var states = {};
+    var parents = {};
+    var owners = {};
+    var scope = {};
+    // 全要素のノードを保持せず、未処理の要素と既知の所属だけを並行する配列に積む。
+    var stack = [];
+    var stackKeys = [];
+    var stackOwners = [];
+    var stackOwnerKeys = [];
+    var pending = [];
+    var pendingGroups = {};
+    var pendingCompounds = {};
 
-    function walk(it) {
-        if (!it) return;
-        var tn;
-        try {
-            tn = String(it.typename);
-        } catch (e) {
-            if (unsupportedVisitor) unsupportedVisitor(it);
-            return;
+    function itemKey(item) {
+        return artItemKey(item, references);
+    }
+
+    function parentOf(item, key) {
+        if (typeof parents[key] !== 'undefined') return parents[key];
+        var parent = null;
+        try { parent = item.parent || null; } catch (e) {
+            if (isUserCancelledError(e)) throw e;
+            return undefined;
         }
-        if (tn === 'GroupItem') {
-            var arr;
-            var n;
+        parents[key] = parent;
+        return parent;
+    }
+
+    function compoundOwner(item, knownKey) {
+        var key = knownKey || itemKey(item);
+        if (typeof owners[key] !== 'undefined') return owners[key];
+        var path = [];
+        var seen = {};
+        var owner = null;
+        while (item) {
+            if (heartbeat) heartbeat();
+            if (typeof owners[key] !== 'undefined') { owner = owners[key]; break; }
+            if (seen[key]) break;
+            seen[key] = true;
+            path.push(key);
+            var type = '';
+            try { type = String(item.typename); } catch (e) {
+                if (isUserCancelledError(e)) throw e;
+                item = undefined;
+                break;
+            }
+            if (type === 'CompoundPathItem') { owner = item; break; }
+            if (type === 'Document' || type === 'Layer') break;
+            item = parentOf(item, key);
+            if (item) key = itemKey(item);
+        }
+        if (typeof item !== 'undefined') {
+            for (var p = 0; p < path.length; p++) owners[path[p]] = owner;
+        }
+        return owner;
+    }
+
+    function pathOwner(item, key) {
+        if (typeof owners[key] !== 'undefined') return owners[key];
+        var parent = parents[key];
+        if (typeof parent === 'undefined') {
+            try { parent = item.parent; } catch (e) {
+                if (isUserCancelledError(e)) throw e;
+                return null;
+            }
+        }
+        return parent ? compoundOwner(parent) : null;
+    }
+
+    function belongsToSelection(item) {
+        var path = [];
+        var seen = {};
+        var included = false;
+        while (item) {
+            if (heartbeat) heartbeat();
+            var key = itemKey(item);
+            if (typeof scope[key] !== 'undefined') { included = scope[key]; break; }
+            if (seen[key]) break;
+            seen[key] = true;
+            path.push(key);
+            item = parentOf(item, key);
+        }
+        if (typeof item !== 'undefined') {
+            for (var p = 0; p < path.length; p++) scope[path[p]] = included;
+        }
+        return included;
+    }
+
+    function report(item, knownKey) {
+        var key = knownKey || itemKey(item);
+        if (states[key] & 4) return;
+        states[key] = (states[key] || 0) | 4;
+        if (unsupportedVisitor) unsupportedVisitor(item);
+    }
+
+    function emit(item, type, owner, knownKey) {
+        var key = knownKey || itemKey(owner);
+        if (states[key] & 2) return;
+        states[key] = (states[key] || 0) | 2;
+        visitor(item, type, owner);
+    }
+
+    function readCollection(item, property, receive, reverse) {
+        var length = -1;
+        var failed = false;
+        var collection;
+        try {
+            collection = item[property];
+            length = collection.length;
+            if (typeof length !== 'number' || !isFinite(length) || length < 0) throw new Error('Invalid collection');
+        } catch (e) {
+            if (isUserCancelledError(e)) throw e;
+            return { length: -1, failed: true };
+        }
+        for (var c = 0; c < length; c++) {
+            if (heartbeat) heartbeat();
+            var child;
             try {
-                arr = it.pageItems;
-                n = arr ? arr.length : 0;
+                var index = reverse ? length - 1 - c : c;
+                child = collection[index];
+                if (!child) throw new Error('Unavailable child');
             } catch (e2) {
                 if (isUserCancelledError(e2)) throw e2;
-                if (unsupportedVisitor) unsupportedVisitor(it);
-                return;
+                failed = true;
+                continue;
             }
-            for (var i = 0; i < n; i++) {
-                var child;
-                try {
-                    child = arr[i];
-                } catch (e3) {
-                    if (isUserCancelledError(e3)) throw e3;
-                    if (unsupportedVisitor) unsupportedVisitor(it);
-                    return;
-                }
-                walk(child);
-            }
-        } else if (tn === 'CompoundPathItem') {
-            var arr2;
-            var representative;
+            if (receive(child) === false) break;
+        }
+        return { length: length, failed: failed };
+    }
+
+    function walkGroup(item, key, owner, ownerKey) {
+        var start = stack.length;
+        var length = -1;
+        var failed = false;
+        var collection;
+        try {
+            collection = item.pageItems;
+            length = collection.length;
+            if (typeof length !== 'number' || !isFinite(length) || length < 0) throw new Error('Invalid collection');
+        } catch (e) {
+            if (isUserCancelledError(e)) throw e;
+            length = -1;
+            failed = true;
+        }
+        // 逆順に積み、取り出す順序は従来どおりにする。正常時は中間の子一覧を作らない。
+        for (var i = length - 1; i >= 0; i--) {
+            if (heartbeat) heartbeat();
+            var child;
             try {
-                arr2 = it.pathItems;
-                if (!arr2 || arr2.length === 0) {
-                    if (unsupportedVisitor) unsupportedVisitor(it);
-                    return;
-                }
-                representative = arr2[0];
-            } catch (e4) {
-                if (isUserCancelledError(e4)) throw e4;
-                if (unsupportedVisitor) unsupportedVisitor(it);
-                return;
+                child = collection[i];
+                if (!child) throw new Error('Unavailable child');
+            } catch (e2) {
+                if (isUserCancelledError(e2)) throw e2;
+                failed = true;
+                continue;
             }
-            visitor(representative, 'PathItem', it);
-        } else if (tn === 'TextFrame' || tn === 'PathItem') {
-            visitor(it, tn, it);
-        } else if (unsupportedVisitor) {
-            unsupportedVisitor(it);
+            stack.push(child);
+            stackKeys.push(itemKey(child));
+            stackOwners.push(owner);
+            stackOwnerKeys.push(ownerKey);
+        }
+        var emptyClip = false;
+        try { emptyClip = length === 0 && item.clipped === true; } catch (e3) { }
+        if (!failed && !emptyClip) return;
+
+        // 取得不能な子がある場合だけ、重複確認表と型別コレクションで補完する。
+        var found = {};
+        var foundCount = 0;
+        for (var s = start; s < stack.length; s++) {
+            if (!found[stackKeys[s]]) {
+                found[stackKeys[s]] = true;
+                foundCount++;
+            }
+        }
+        var collections = ['pathItems', 'groupItems', 'compoundPathItems', 'textFrames', 'meshItems', 'placedItems',
+            'rasterItems', 'pluginItems', 'symbolItems', 'graphItems', 'nonNativeItems', 'legacyTextItems'];
+        for (var c = 0; c < collections.length; c++) {
+            readCollection(item, collections[c], function (child) {
+                var childKey = itemKey(child);
+                var parent = parentOf(child, childKey);
+                if (!parent || itemKey(parent) !== key || found[childKey]) return;
+                found[childKey] = true;
+                foundCount++;
+                // 補完した子は、先に取得できた子の後で処理する。
+                stack.splice(start, 0, child);
+                stackKeys.splice(start, 0, childKey);
+                stackOwners.splice(start, 0, owner);
+                stackOwnerKeys.splice(start, 0, ownerKey);
+            });
+        }
+        var expected = emptyClip ? -1 : length;
+        if (expected < 0 || foundCount < expected) {
+            var record = { item: item, key: key, type: 'GroupItem', expected: expected, found: found, count: foundCount };
+            pending.push(record);
+            pendingGroups[key] = record;
         }
     }
-    for (var i = 0; i < nSel; i++) {
-        var root;
-        try {
-            root = sel[i];
-        } catch (e5) {
-            throw e5;
+
+    function drainStack() {
+        while (stack.length) {
+            if (heartbeat) heartbeat();
+            var item = stack.pop();
+            var key = stackKeys.pop() || itemKey(item);
+            var owner = stackOwners.pop();
+            var ownerKey = stackOwnerKeys.pop();
+            if (states[key] & 1) continue;
+            states[key] = (states[key] || 0) | 1;
+            var type;
+            try { type = String(item.typename); } catch (e) {
+                if (isUserCancelledError(e)) throw e;
+                report(item, key);
+                continue;
+            }
+
+            if (type === 'GroupItem') {
+                if (typeof owner === 'undefined') {
+                    owner = compoundOwner(item, key);
+                    ownerKey = owner ? itemKey(owner) : null;
+                }
+                walkGroup(item, key, owner, ownerKey);
+            } else if (type === 'CompoundPathItem') {
+                var representative = null;
+                // 最初に取得できたPathItemを代表とする。取得不能な添字の後も調べる。
+                readCollection(item, 'pathItems', function (child) {
+                    try {
+                        if (child.typename === 'PathItem') { representative = child; return false; }
+                        else {
+                            stack.push(child);
+                            stackKeys.push(null);
+                            stackOwners.push(item);
+                            stackOwnerKeys.push(key);
+                        }
+                    } catch (e2) { if (isUserCancelledError(e2)) throw e2; }
+                });
+                if (representative) {
+                    emit(representative, 'PathItem', item, key);
+                } else {
+                    pending.push({ item: item, key: key, type: type });
+                    pendingCompounds[key] = item;
+                }
+            } else if (type === 'PathItem') {
+                if (typeof owner === 'undefined') {
+                    owner = pathOwner(item, key);
+                    ownerKey = owner ? itemKey(owner) : key;
+                }
+                emit(item, type, owner || item, owner ? ownerKey : key);
+            } else if (type === 'TextFrame') {
+                emit(item, type, item, key);
+            } else {
+                report(item, key);
+            }
         }
-        walk(root);
+    }
+
+    function hasPendingRecovery() {
+        for (var p = 0; p < pending.length; p++) {
+            var record = pending[p];
+            if (record.type === 'CompoundPathItem') {
+                if (!(states[record.key] & 2)) return true;
+            } else if (record.expected < 0 || record.count < record.expected) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function recoverDocumentItem(item) {
+        if (!belongsToSelection(item)) return;
+        var key = itemKey(item);
+        var parent = parentOf(item, key);
+        var group = parent ? pendingGroups[itemKey(parent)] : null;
+        if (group && !group.found[key]) {
+            group.found[key] = true;
+            group.count++;
+        }
+        if (!(states[key] & 1)) {
+            stack.push(item);
+            stackKeys.push(key);
+            stackOwners.push(undefined);
+            stackOwnerKeys.push(null);
+            drainStack();
+        }
+        return hasPendingRecovery();
+    }
+    for (var i = 0; i < count; i++) {
+        if (heartbeat) heartbeat();
+        var selected = selection[i];
+        if (!selected) continue;
+        var selectedKey = itemKey(selected);
+        var owner = compoundOwner(selected, selectedKey);
+        var root = owner || selected;
+        var rootKey = owner ? itemKey(owner) : selectedKey;
+        scope[rootKey] = true;
+        stack.push(root);
+        stackKeys.push(rootKey);
+        stackOwners.push(owners[rootKey]);
+        stackOwnerKeys.push(owner ? rootKey : null);
+    }
+    stack.reverse();
+    stackKeys.reverse();
+    stackOwners.reverse();
+    stackOwnerKeys.reverse();
+    drainStack();
+    var needsCompoundRecovery = false;
+    for (var p = 0; p < pending.length; p++) {
+        var record = pending[p];
+        if (record.type === 'CompoundPathItem' && !(states[record.key] & 2)) {
+            needsCompoundRecovery = true;
+            break;
+        }
+    }
+    var recoveryGroups = null;
+    if (needsCompoundRecovery) {
+        // pathItemsが空の複合パスは、その直下のグループから内部を取得する。
+        // UUIDが一致する親だけを扱い、必要な対象が揃った時点で終了する。
+        recoveryGroups = [];
+        var lastParent = null;
+        var lastParentKey = null;
+        readCollection(doc, 'groupItems', function (item) {
+            recoveryGroups.push(item);
+            var parent;
+            try {
+                parent = item.parent;
+            } catch (e) {
+                if (isUserCancelledError(e)) throw e;
+                return;
+            }
+            if (!parent) return;
+            if (parent !== lastParent) {
+                lastParentKey = itemKey(parent);
+                // 取得失敗時は、次の参照でUUIDを再確認できるようにする。
+                lastParent = lastParentKey.indexOf('uuid:') === 0 ? parent : null;
+            }
+            var compound = pendingCompounds[lastParentKey];
+            if (!compound || (states[lastParentKey] & 2)) return;
+            var key = itemKey(item);
+            parents[key] = compound;
+            stack.push(item);
+            stackKeys.push(key);
+            stackOwners.push(compound);
+            stackOwnerKeys.push(lastParentKey);
+            drainStack();
+            return hasPendingRecovery();
+        }, true);
+    }
+    if (hasPendingRecovery()) {
+        // 取得できない対象が残る場合に文書側の一覧を補完する。
+        // グループ一覧は既に取得した参照を使い、各一覧の読み取りを一回に抑える。
+        var documentCollections = ['pageItems', 'pathItems', 'groupItems'];
+        for (var d = 0; d < documentCollections.length && hasPendingRecovery(); d++) {
+            var property = documentCollections[d];
+            var source = property === 'groupItems' && recoveryGroups ? { groupItems: recoveryGroups } : doc;
+            readCollection(source, property, recoverDocumentItem);
+        }
+    }
+    for (var u = 0; u < pending.length; u++) {
+        var unresolved = pending[u];
+        if (unresolved.type === 'CompoundPathItem') {
+            if (!(states[unresolved.key] & 2)) report(unresolved.item, unresolved.key);
+        } else if (unresolved.expected < 0 || unresolved.count < unresolved.expected) {
+            report(unresolved.item, unresolved.key);
+        }
     }
     return true;
 }
 
-function makeSelectionArtItemEntry(target, typeName, owner, heartbeat) {
-    var entry = {
-        target: target,
-        typeName: typeName,
-        owner: owner || target,
-        tasks: [],
-        attempts: 0,
-        skipped: false
-    };
-    if (typeName === 'TextFrame') {
-        addTextColorTasks(entry, target, heartbeat);
-    } else {
-        addPathPaintTask(entry, target, 'filled', 'fillColor', 'fillStateReadFailed');
-        addPathPaintTask(entry, target, 'stroked', 'strokeColor', 'strokeStateReadFailed');
-    }
-    for (var i = 0, n = entry.tasks.length; i < n; i++) {
-        entry.attempts += entry.tasks[i].steps || 1;
-    }
+
+var gPathTaskPlans = [];
+function createSelectionWorkList() {
+    // 一件ごとの記録オブジェクトを保持せず、各情報を同じ添字で対応付ける。
+    return { targets: [], typeNames: [], owners: [], tasks: [], attempts: [], skipped: [], opacityStates: [] };
+}
+
+function loadSelectionWorkEntry(workList, index, entry) {
+    entry = entry || createSelectionArtItemRecord(null, '', null);
+    entry.target = workList.targets[index];
+    entry.typeName = workList.typeNames[index];
+    entry.owner = workList.owners[index];
+    entry.tasks = workList.tasks[index];
+    entry.attempts = workList.attempts[index];
+    entry.skipped = !!workList.skipped[index];
+    entry.autoBlackOverprintOpacityState = workList.opacityStates[index];
+    entry.workList = workList;
+    entry.workIndex = index;
     return entry;
 }
 
-function applySelectionTask(entry, task) {
-    var changed = 0;
+function createSelectionArtItemRecord(target, typeName, owner) {
+    return {
+        target: target,
+        typeName: typeName,
+        owner: owner || target
+    };
+}
+
+function makeSelectionArtItemEntry(target, typeName, owner, heartbeat) {
+    return populateSelectionArtItemEntry(createSelectionArtItemRecord(target, typeName, owner), heartbeat);
+}
+
+function populateSelectionArtItemEntry(entry, heartbeat) {
+    var target = entry.target;
+    var typeName = entry.typeName;
+    entry.attempts = 0;
+    entry.skipped = false;
+    if (typeName === 'TextFrame') {
+        entry.tasks = [];
+        addTextColorTasks(entry, target, heartbeat);
+        for (var i = 0; i < entry.tasks.length; i++) entry.attempts += entry.tasks[i].steps || 1;
+        return entry;
+    }
+    var plan = readPathTaskPlan(target);
+    entry.tasks = plan.tasks;
+    entry.attempts = plan.attempts;
+    return entry;
+}
+
+function readPathTaskPlan(target) {
+    var fillState;
+    var strokeState;
+    try { fillState = target.filled ? 1 : 0; } catch (fillError) { fillState = 2; }
+    try { strokeState = target.stroked ? 1 : 0; } catch (strokeError) { strokeState = 2; }
+    // オフ・オン・取得失敗の組み合わせは最大9種類。対象や色を含まない定義だけを共有する。
+    // 実際の色・エラー・変換結果はprepareSelectionTasks以降でオブジェクトごとに保持する。
+    var key = fillState * 3 + strokeState;
+    var plan = gPathTaskPlans[key];
+    if (!plan) {
+        var tasks = [];
+        if (fillState === 1) tasks.push({ kind: 'colorProperty', propName: 'fillColor', allowGradient: true, steps: 1 });
+        else if (fillState === 2) tasks.push({ kind: 'scanFailure', reason: 'fillStateReadFailed', steps: 1 });
+        if (strokeState === 1) tasks.push({ kind: 'colorProperty', propName: 'strokeColor', allowGradient: true, steps: 1 });
+        else if (strokeState === 2) tasks.push({ kind: 'scanFailure', reason: 'strokeStateReadFailed', steps: 1 });
+        plan = { tasks: tasks, attempts: tasks.length };
+        gPathTaskPlans[key] = plan;
+    }
+    return plan;
+}
+
+function readTextTaskAttributes(entry, task) {
+    var range = makeTextSubRange(entry.target, task.start, task.end);
+    if (!range) return null;
+    try {
+        return range.characterAttributes;
+    } catch (e) {
+        if (isUserCancelledError(e)) throw e;
+        return null;
+    }
+}
+
+function prepareSelectionTask(entry, task) {
+    var prepared = { target: entry.target, paints: [], steps: task.steps || 1 };
     if (task.kind === 'scanFailure') {
-        countSkip(entry, task.reason);
+        prepared.reason = task.reason;
     } else if (task.kind === 'colorProperty') {
-        changed = processColorPropertyCore(entry.target, task.propName, task.allowGradient, entry);
+        prepared.paints.push({ propName: task.propName, allowGradient: task.allowGradient,
+            source: readColorProperty(entry.target, task.propName) });
     } else if (task.kind === 'textRun') {
-        var range = makeTextSubRange(entry.target, task.start, task.end);
-        var attrs = null;
-        if (range) {
-            try {
-                attrs = range.characterAttributes;
-            } catch (e) { }
-        }
+        var attrs = readTextTaskAttributes(entry, task);
         if (!attrs) {
-            countSkip(entry, 'textAttributesReadFailed');
+            prepared.reason = 'textAttributesReadFailed';
         } else {
-            changed += processColorPropertyCore(attrs, 'fillColor', false, entry);
-            changed += processColorPropertyCore(attrs, 'strokeColor', false, entry);
+            prepared.paints.push({ propName: 'fillColor', allowGradient: false, source: readColorProperty(attrs, 'fillColor') });
+            prepared.paints.push({ propName: 'strokeColor', allowGradient: false, source: readColorProperty(attrs, 'strokeColor') });
         }
     }
-    stepProgress(task.steps || 1);
+    return prepared;
+}
+
+function prepareSelectionTasks(entry) {
+    var prepared = [];
+    for (var i = 0; i < entry.tasks.length; i++) {
+        checkpointProgress();
+        prepared.push(prepareSelectionTask(entry, entry.tasks[i]));
+    }
+    return prepared;
+}
+
+function hasPreparedReadFailure(prepared) {
+    for (var i = 0; i < prepared.length; i++) {
+        if (prepared[i].reason) return true;
+        var paints = prepared[i].paints;
+        for (var p = 0; p < paints.length; p++) {
+            if (paints[p].source.reason) return true;
+        }
+    }
+    return false;
+}
+
+function prepareCompoundPathTasks(entry, prepared) {
+    if (!hasPreparedReadFailure(prepared)) return prepared;
+    var paths;
+    var count;
+    try {
+        if (!entry.owner || entry.owner.typename !== 'CompoundPathItem') return prepared;
+        paths = entry.owner.pathItems;
+        count = paths.length;
+    } catch (e) {
+        if (isUserCancelledError(e)) throw e;
+        return prepared;
+    }
+    for (var i = 0; i < count; i++) {
+        checkpointProgress();
+        var candidate;
+        try {
+            candidate = paths[i];
+            if (!candidate || candidate === entry.target || candidate.typename !== 'PathItem') continue;
+        } catch (e2) {
+            if (isUserCancelledError(e2)) throw e2;
+            continue;
+        }
+        var alternative = makeSelectionArtItemEntry(candidate, 'PathItem', entry.owner);
+        var alternativeTasks = prepareSelectionTasks(alternative);
+        if (hasPreparedReadFailure(alternativeTasks)) continue;
+        entry.target = candidate;
+        entry.tasks = alternative.tasks;
+        entry.attempts = alternative.attempts;
+        if (entry.workList) {
+            entry.workList.targets[entry.workIndex] = candidate;
+            entry.workList.tasks[entry.workIndex] = alternative.tasks;
+            entry.workList.attempts[entry.workIndex] = alternative.attempts;
+        }
+        return alternativeTasks;
+    }
+    return prepared;
+}
+
+function applySelectionTask(entry, task, prepared) {
+    prepared = prepared || prepareSelectionTask(entry, task);
+    if (task.kind === 'textRun' && !prepared.reason) {
+        // 別の範囲を読む際にホストの範囲参照が変化しても、書き込み先を確定する。
+        prepared.target = readTextTaskAttributes(entry, task);
+        if (!prepared.target) {
+            prepared.reason = 'textAttributesReadFailed';
+            prepared.paints = [];
+        }
+    }
+    var changed = 0;
+    if (prepared.reason) countSkip(entry, prepared.reason);
+    for (var i = 0; i < prepared.paints.length; i++) {
+        var paint = prepared.paints[i];
+        changed += processColorPropertyCore(prepared.target, paint.propName, paint.allowGradient, entry, paint.source, task);
+    }
+    stepProgress(prepared.steps);
     return changed;
 }
 
 function applySelectionArtItemEntry(entry) {
     if (!entry || !entry.target) return 0;
+    // オブジェクト内の全色を取得してから適用する。文字範囲も元の属性で判定できる。
+    var prepared = prepareSelectionTasks(entry);
+    if (entry.typeName === 'PathItem') prepared = prepareCompoundPathTasks(entry, prepared);
+    if (ignoredSwatchRules) {
+        var decision = ignoredObjectDecision(prepared, ignoredSwatchRules);
+        if (decision) {
+            if (decision === 'ignore') ignoredSwatchRules.ignoredCount++;
+            else countSkip(entry, decision);
+            stepProgress(entry.attempts);
+            return 0;
+        }
+    }
     var changed = 0;
     for (var i = 0, n = entry.tasks.length; i < n; i++) {
-        changed += applySelectionTask(entry, entry.tasks[i]);
+        changed += applySelectionTask(entry, entry.tasks[i], prepared[i]);
     }
     return changed;
 }
@@ -3027,6 +4254,16 @@ function applySelectionArtItemEntry(entry) {
 // 選択を走査して全適用（Group/Compound含む） - 詳細集計
 function applyToSelection(items) {
     var applied = 0;
+    if (items && items.targets) {
+        // 全件の記録を作り直さず、現在処理する一件分だけを入れ替えて使う。
+        var entry = createSelectionArtItemRecord(null, '', null);
+        for (var j = 0, count = items.targets.length; j < count; j++) {
+            loadSelectionWorkEntry(items, j, entry);
+            applied += applySelectionArtItemEntry(entry);
+        }
+        return { count: applied };
+    }
+    // 単体処理などで作成済みの記録配列を渡す場合も、同じ変換処理を使う。
     for (var i = 0, n = items ? items.length : 0; i < n; i++) {
         applied += applySelectionArtItemEntry(items[i]);
     }
@@ -3060,8 +4297,15 @@ function validateActiveDocument() {
 function collectSelectionStats(showStatusWindow) {
     var planned = 0;
     var selectedObjectCount = 0;
+    var pathCount = 0;
+    var textCount = 0;
     var unsupportedObjectCount = 0;
-    var items = [];
+    var items = createSelectionWorkList();
+    var targets = items.targets;
+    var typeNames = items.typeNames;
+    var owners = items.owners;
+    var taskLists = items.tasks;
+    var attempts = items.attempts;
     var unsupportedItems = [];
     var unsupportedBreakdown = [];
     var cancelled = false;
@@ -3071,18 +4315,55 @@ function collectSelectionStats(showStatusWindow) {
     } : null;
     try {
         var walked = walkSelectionArtItems(function (target, typeName, owner) {
-            var entry = makeSelectionArtItemEntry(target, typeName, owner, scanHeartbeat);
-            items.push(entry);
+            // 走査中は対象だけを保持し、属性取得と予定作成は走査完了後にまとめて行う。
+            targets.push(target);
+            typeNames.push(typeName);
+            owners.push(owner || target);
             selectedObjectCount++;
-            planned += entry.attempts;
-            if (statusWindow) statusWindow.tick();
+            if (typeName === 'TextFrame') textCount++;
+            else pathCount++;
         }, function (it) {
             unsupportedObjectCount++;
             unsupportedItems.push(it);
-            addUnsupportedBreakdownEntry(unsupportedBreakdown, it);
-            if (statusWindow) statusWindow.tick();
-        });
+        }, scanHeartbeat);
         if (!walked) throw new Error(uiText('requireSelection'));
+
+        // 取得済みの対象から予定だけを格納する。階層・対象・代表パスを再取得しない。
+        var i;
+        var n = targets.length;
+        var plan;
+        if (pathCount > 0) {
+            taskLists.length = n;
+            attempts.length = n;
+            for (i = 0; i < n; i++) {
+                if (typeNames[i] === 'TextFrame') continue;
+                if (scanHeartbeat) scanHeartbeat();
+                plan = readPathTaskPlan(targets[i]);
+                taskLists[i] = plan.tasks;
+                attempts[i] = plan.attempts;
+                planned += plan.attempts;
+            }
+        }
+        if (textCount > 0) {
+            taskLists.length = n;
+            attempts.length = n;
+            var entry = createSelectionArtItemRecord(null, 'TextFrame', null);
+            for (i = 0; i < n; i++) {
+                if (typeNames[i] !== 'TextFrame') continue;
+                if (scanHeartbeat) scanHeartbeat();
+                entry.target = targets[i];
+                populateSelectionArtItemEntry(entry, scanHeartbeat);
+                taskLists[i] = entry.tasks;
+                attempts[i] = entry.attempts;
+                planned += entry.attempts;
+            }
+        }
+        if (unsupportedItems.length > 0) {
+            for (i = 0; i < unsupportedItems.length; i++) {
+                if (scanHeartbeat) scanHeartbeat();
+                addUnsupportedBreakdownEntry(unsupportedBreakdown, unsupportedItems[i]);
+            }
+        }
     } catch (e) {
         if (isUserCancelledError(e)) {
             cancelled = true;
@@ -3113,6 +4394,12 @@ function collectFinalSkippedItems(stats) {
 
     for (i = 0; i < unsupported.length; i++) {
         addUniqueSelectableItem(items, unsupported[i], seenKeys, fallbackRefs);
+    }
+    if (entries.targets) {
+        for (i = 0; i < entries.targets.length; i++) {
+            if (entries.skipped[i]) addUniqueSelectableItem(items, entries.owners[i], seenKeys, fallbackRefs);
+        }
+        return items;
     }
     for (i = 0; i < entries.length; i++) {
         if (entries[i].skipped) {
@@ -3298,9 +4585,22 @@ function showCompletionDialog(info) {
     addCompletionMetricRow(metricsGroup, 'selectedObjects', info.selectedObjectCount, 'updatedColors', info.updatedColors, metricWidths);
     addCompletionMetricRow(metricsGroup, 'cacheHitRate', info.cacheHitRate, 'processingTime', info.processingTime, metricWidths, info.processingTimeHelp);
 
+    if (info.ignoredCount > 0) {
+        metricsGroup.add('statictext', undefined, formatMetricText('ignoredObjects', formatNumberWithUnit(info.ignoredCount, 'selectedObjectsUnit')));
+    }
+
     if (info.swatchRenameSkippedCount > 0) {
         var renameSkipped = metricsGroup.add('statictext', undefined, formatMetricText('swatchRenameSkipped', info.swatchRenameSkippedCount));
         renameSkipped.helpTip = uiText('swatchRenameSkippedHelp');
+    }
+
+    if (info.ignoredSwatches && info.ignoredSwatches.length > 0) {
+        var ignoredPanelWidth = metricWidths.left + metricWidths.right + 18;
+        var ignoredPanel = addCompletionPanel(dlg, ignoredPanelWidth);
+        var ignoredTitle = ignoredPanel.add('statictext', undefined, uiText('ignoredSwatchesResult'));
+        setControlBold(ignoredTitle);
+        var ignoredListHeight = Math.min(6, info.ignoredSwatches.length) * 22 + 8;
+        createSwatchList(ignoredPanel, info.ignoredSwatches, ignoredPanelWidth - 20, ignoredListHeight, false, false);
     }
 
     if (info.skippedCount > 0) {
@@ -3344,6 +4644,7 @@ function cleanupAfterRun() {
         gProgress.close();
         gProgress = null;
     }
+    removeUnusedColorResources();
     try {
         resultCache = {};
         labConvCache = {};
@@ -3353,12 +4654,18 @@ function cleanupAfterRun() {
         processedGradientMap = {};
         spotReferenceKeys = [];
         gradientReferenceKeys = [];
+        ignoredSwatchRules = null;
+        swatchPreviewCRCTable = null;
         pendingSpotRenames = [];
         spotRenameSkippedCount = 0;
+        colorDocument = null;
+        opacityStateCache = {};
+        opacityReferenceKeys = [];
         autoBlackOverprintState = createAutoBlackOverprintState();
         cacheHitCount = 0;
         resultCacheLookupCount = 0;
         gSkipBreakdown = [];
+        gPathTaskPlans = [];
         CMY_K_BALANCE_ENABLED = DEFAULT_CMY_K_BALANCE_ENABLED;
         CMY_K_BALANCE_VALUE = DEFAULT_CMY_K_BALANCE_VALUE;
         K_BOOST_ENABLED = DEFAULT_K_BOOST_ENABLED;
@@ -3378,10 +4685,9 @@ function cleanupAfterRun() {
 // メイン処理関数
 /////////////////////////////////////////
 
-// 変換を実行し、計測結果を表示する処理
+// 変換を実行し、処理結果を表示する
 (
     function main() {
-
         var doc = validateActiveDocument();
         if (!doc) return;
 
@@ -3390,7 +4696,7 @@ function cleanupAfterRun() {
         var stats = collectSelectionStats(true);
         if (!stats || stats.cancelled) return;
 
-        var opt = showConvertOptionsDialog(stats);
+        var opt = showConvertOptionsDialog(stats, doc);
         if (!opt || !opt.ok) {
             // ユーザーがキャンセルした場合は処理を中止
             return;
@@ -3402,6 +4708,8 @@ function cleanupAfterRun() {
         K_BOOST_ENABLED = opt.enableKBoost;
         LIGHT_COLOR_PROTECT_ENABLED = opt.enableLightColorProtect;
         AVOID_AUTO_BLACK_OVERPRINT_ENABLED = opt.avoidAutoBlackOverprint;
+        colorDocument = doc;
+        ignoredSwatchRules = createIgnoredSwatchRules(opt.ignoredSwatches);
 
         gProgress = createProgressBar(stats.planned > 0 ? stats.planned : 100);
         var t0 = nowMs();
@@ -3439,6 +4747,8 @@ function cleanupAfterRun() {
                 cacheHitRate: formatPercent(cacheHitCount, resultCacheLookupCount),
                 processingTime: "",
                 skippedCount: finalSkippedItems.length,
+                ignoredCount: ignoredSwatchRules ? ignoredSwatchRules.ignoredCount : 0,
+                ignoredSwatches: collectIgnoredSwatches(ignoredSwatchRules),
                 skippedMessage: "",
                 skippedDetails: skippedDetails
             };
@@ -3450,6 +4760,9 @@ function cleanupAfterRun() {
             }
         } finally {
             cleanupStartMs = nowMs();
+            // 結果表示で必要な件数・未適用対象は取得済み。大きな作業一覧への参照を外す。
+            if (stats) stats.items = null;
+            stats = null;
             cleanupAfterRun();
             cleanupEndMs = nowMs();
         }
