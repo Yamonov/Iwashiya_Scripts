@@ -4,17 +4,18 @@
 SCRIPTMETA-BEGIN
 Script-ID=org.iwashi.CMYKto100GCRConverter_ai
 Meta-Default-language=ja
-Version=2.7
+Version=3.0
 Meta-URL=https://github.com/Yamonov/Iwashiya_Scripts/tree/main/Illustrator
 Name=色を変えずにCMYK値を調整
 Name[en]=Optimize CMYK Color Separations
-Tags=カラー,color,CMYK,製版,prepress
+Tags=カラー,color,CMYK,製版,prepress,IwashiKit
 Author=Murakami Yoshiteru
-Release-Date=2026-11-17
+Release-Date=2026-11-18
 Target-App=Illustrator
 Edit-Password-SHA256=oS5aCLoTCKedGLZN:3d8282cb048f8c02d5bf1dca0493471b70fda75c2a3131e4cb0c10b4c1688127
 Description-BEGIN
 [ja]
+・対応する IwashiKit が利用できる場合は、変換オプションを先に表示し、対象の収集から書き戻しまでをプラグインで行います。
 ・選択したCMYKオブジェクトのカラーを、発色を維持しつつ、印刷でのブレが少ないカラー、CMYのうち１〜２版（＋K）の値に整理します。
 ・彩度調整オプションで、仕上がりの彩度を上げられます。
 ・K量の調整オプションで、Kを減らす方向または増やす方向へ段階的に寄せられます。増やすとより多くのグレートーンがKのみに、減らすとCMYからKを抜いてK濁りを抑えます。
@@ -32,6 +33,7 @@ Description-BEGIN
 ・グラデーションメッシュとブレンドオブジェクトは非対応です。
 
 [en]
+- When a compatible IwashiKit is available, conversion options open first and the plug-in handles the selection and conversion.
 - Simplifies the colors of selected CMYK objects to one or two CMY plates plus K, preserving their appearance while reducing variation in print.
 - The saturation option can increase the saturation of the result.
 - The K amount option adjusts black ink in steps, either decreasing or increasing it. Increasing K converts more gray tones to K only; decreasing it reduces black in CMY mixtures to avoid muddy colors.
@@ -75,6 +77,12 @@ var YamoScriptVersionOnly = formatScriptVersionOnly(YamoScriptMeta);
 //var YAMO_LOCALE_OVERRIDE = "en"; // テスト時のみ "ja" または "en" を指定
 
 var UI_TEXT = {
+    changedObjects: { ja: "変更したオブジェクト", en: "Changed objects" },
+    iwashiKitTime: { ja: "IwashiKit 内の処理時間", en: "Time in IwashiKit" },
+    iwashiKitSwatchesChanged: { ja: "文書またはスウォッチ一覧が変わりました。もう一度実行してください。", en: "The document or swatch list changed. Run the script again." },
+    iwashiKitApplyReverted: { ja: "書き戻し中にエラーが発生し、変更を取り消しました。", en: "A write error occurred and the changes were reverted." },
+    iwashiKitRollbackFailed: { ja: "書き戻し中にエラーが発生し、変更を取り消せませんでした。", en: "A write error occurred and the changes could not be reverted." },
+    iwashiKitApplyFailed: { ja: "IwashiKit で変換できませんでした。", en: "IwashiKit could not apply the conversion." },
     progressTitle: { ja: "CMYK値を整理中...", en: "Adjusting CMYK..." },
     progressCancelTitleSuffix: { ja: "（Escでキャンセル）", en: "(Esc to cancel)" },
     scanningSelection: { ja: "対象を調査中...", en: "Checking selection..." },
@@ -337,6 +345,7 @@ var COMPLETION_TEXT_PADDING_WIDTH = 34;
 var COMPLETION_TEXT_LINE_HEIGHT = 17;
 var COMPLETION_TEXT_HEIGHT_PADDING = 6;
 var UNSUPPORTED_OBJECT_TYPE_LABELS = {
+    BlendItem: { ja: "ブレンド", en: "Blend" },
     MeshItem: { ja: "グラデーションメッシュ", en: "Gradient mesh" },
     RasterItem: { ja: "ラスタ画像", en: "Raster image" },
     PlacedItem: { ja: "配置画像", en: "Placed image" },
@@ -346,9 +355,18 @@ var UNSUPPORTED_OBJECT_TYPE_LABELS = {
     NonNativeItem: { ja: "非ネイティブオブジェクト", en: "Non-native object" },
     LegacyTextItem: { ja: "旧テキスト", en: "Legacy text" },
     GroupItem: { ja: "グループ（内部取得不可）", en: "Group (contents unavailable)" },
-    CompoundPathItem: { ja: "複合パス（内部取得不可）", en: "Compound path (contents unavailable)" }
+    CompoundPathItem: { ja: "複合パス（内部取得不可）", en: "Compound path (contents unavailable)" },
+    TextFrame: { ja: "テキストフレーム（全体の選択が必要）", en: "Text frame (select the entire frame)" },
+    RadialRepeat: { ja: "ラジアルリピート", en: "Radial repeat" },
+    GridRepeat: { ja: "グリッドリピート", en: "Grid repeat" },
+    Symmetry: { ja: "ミラーリピート", en: "Mirror repeat" },
+    ConcentricRepeat: { ja: "同心円リピート", en: "Concentric repeat" },
+    Unknown: { ja: "種別不明のオブジェクト", en: "Unknown object type" }
 };
 var SKIP_REASON_LABELS = {
+    unsupportedObject: { ja: "未対応オブジェクト", en: "Unsupported objects" },
+    unsupportedPaint: { ja: "対象外の色", en: "Unsupported paints" },
+    readFailed: { ja: "属性・色の取得失敗", en: "Could not read attributes or colors" },
     patternColor: { ja: "パターン等", en: "Patterns, etc." },
     nonCMYK: { ja: "非CMYKカラー", en: "Non-CMYK color" },
     noCandidate: { ja: "許容色差内の変換候補なし", en: "No candidate within allowed difference" },
@@ -884,6 +902,22 @@ function swatchPreviewColors(entry, cache) {
     }
 }
 
+function decodeIwashiKitSwatchPreview(hex, kind) {
+    var samples = kind === 'gradient' ? 15 : 1;
+    if (hex.length !== samples * 8 || !/^[0-9a-f]+$/.test(hex)) {
+        return { kind: 'unknown', colors: [] };
+    }
+    var colors = [];
+    for (var i = 0; i < hex.length; i += 8) {
+        var color = [];
+        for (var channel = 0; channel < 8; channel += 2) {
+            color.push(parseInt(hex.substr(i + channel, 2), 16) / 255);
+        }
+        colors.push(color);
+    }
+    return { kind: samples === 1 ? 'solid' : 'gradient', colors: colors };
+}
+
 function createSwatchPreviewPNG(preview) {
     // 15pxのRGBA画像をメモリ上で生成する。PNGのIDATは非圧縮DEFLATEを使う。
     var size = 15;
@@ -996,8 +1030,13 @@ function createSwatchList(parent, entries, width, height, checkable, showKind) {
 
     function previewFor(entry) {
         if (entry.preview) return entry.preview;
-        if (!entry.reference) return null;
-        var preview = swatchPreviewColors(entry, colorCache);
+        var preview;
+        if (typeof entry.previewHex === 'string') {
+            preview = decodeIwashiKitSwatchPreview(entry.previewHex, entry.kind);
+        } else {
+            if (!entry.reference) return null;
+            preview = swatchPreviewColors(entry, colorCache);
+        }
         entry.previewKind = preview.kind;
         var key = preview.kind;
         for (var p = 0; p < preview.colors.length; p++) key += ':' + preview.colors[p].join(',');
@@ -1178,9 +1217,7 @@ function createIgnoredSwatchList(panel, catalog, width, height) {
     return createSwatchList(panel, catalog.entries, width - 20, height - 34 - (message ? 40 : 0), true, true);
 }
 
-function showConvertOptionsDialog(stats, doc) {
-    var targetCount = stats.selectedObjectCount + stats.unsupportedObjectCount;
-    var plannedCount = stats.planned;
+function showConvertOptionsDialog(stats, doc, useIwashiKit) {
     var dialogMinWidth = 280;
     var dlg = new Window('dialog', uiText('optionsTitle'));
     var columnSpacing = dlg.spacing;
@@ -1376,46 +1413,52 @@ function showConvertOptionsDialog(stats, doc) {
     chkIgnoreSwatches.value = false;
     chkIgnoreSwatches.helpTip = uiText('ignoreSpecifiedSwatchesHelp');
 
-    // 対象数と予測最大時間
-    var infoPanel = leftColumn.add('panel', undefined, uiText('info'));
-    infoPanel.alignment = 'fill';
-    infoPanel.orientation = 'column';
-    infoPanel.alignChildren = ['left', 'center'];
-    infoPanel.preferredSize.width = optionPanelWidth;
-    infoPanel.margins = infoPanelMargins;
-    infoPanel.spacing = 2;
+    if (useIwashiKit) {
+        var poweredBy = leftColumn.add('statictext', undefined, 'powered by IwashiKit');
+        poweredBy.alignment = ['center', 'center'];
+        poweredBy.justify = 'center';
+    } else {
+        var infoPanel = leftColumn.add('panel', undefined, uiText('info'));
+        infoPanel.alignment = 'fill';
+        infoPanel.orientation = 'column';
+        infoPanel.alignChildren = ['left', 'center'];
+        infoPanel.preferredSize.width = optionPanelWidth;
+        infoPanel.margins = infoPanelMargins;
+        infoPanel.spacing = 2;
 
-    var infoStack = infoPanel.add('group');
-    infoStack.orientation = 'column';
-    infoStack.alignment = 'fill';
-    infoStack.alignChildren = ['left', 'center'];
-    infoStack.spacing = 2;
-    infoStack.margins = 0;
-    infoStack.preferredSize.width = optionPanelWidth - 32;
+        var infoStack = infoPanel.add('group');
+        infoStack.orientation = 'column';
+        infoStack.alignment = 'fill';
+        infoStack.alignChildren = ['left', 'center'];
+        infoStack.spacing = 2;
+        infoStack.margins = 0;
+        infoStack.preferredSize.width = optionPanelWidth - 32;
 
-    var targetGroup = infoStack.add('group');
-    targetGroup.orientation = 'row';
-    targetGroup.alignment = 'fill';
-    targetGroup.alignChildren = ['left', 'center'];
-    targetGroup.preferredSize.width = optionPanelWidth - 32;
-    targetGroup.margins = 0;
-    var targetCountText = targetGroup.add('statictext', undefined, formatTargetCountText(targetCount, stats.unsupportedObjectCount));
-    targetCountText.alignment = ['left', 'center'];
-    targetCountText.justify = 'left';
-    targetCountText.helpTip = uiText('targetCountHelp');
+        var targetCount = stats.selectedObjectCount + stats.unsupportedObjectCount;
+        var targetGroup = infoStack.add('group');
+        targetGroup.orientation = 'row';
+        targetGroup.alignment = 'fill';
+        targetGroup.alignChildren = ['left', 'center'];
+        targetGroup.preferredSize.width = optionPanelWidth - 32;
+        targetGroup.margins = 0;
+        var targetCountText = targetGroup.add('statictext', undefined, formatTargetCountText(targetCount, stats.unsupportedObjectCount));
+        targetCountText.alignment = ['left', 'center'];
+        targetCountText.justify = 'left';
+        targetCountText.helpTip = uiText('targetCountHelp');
 
-    var estimateSec = estimateProcessingSeconds(plannedCount);
-    var estimateGroup = infoStack.add('group');
-    estimateGroup.orientation = 'row';
-    estimateGroup.alignment = 'fill';
-    estimateGroup.alignChildren = ['left', 'center'];
-    estimateGroup.preferredSize.width = optionPanelWidth - 32;
-    estimateGroup.margins = 0;
-    var estimateText = estimateGroup.add('statictext', undefined, uiText('estimateTime') + ': ' + formatEstimatedTime(estimateSec));
-    estimateText.alignment = ['left', 'center'];
-    estimateText.justify = 'left';
-    estimateText.helpTip = uiText('estimateHelp');
-    if (estimateSec >= 60) setStaticTextRed(estimateText);
+        var estimateSec = estimateProcessingSeconds(stats.planned);
+        var estimateGroup = infoStack.add('group');
+        estimateGroup.orientation = 'row';
+        estimateGroup.alignment = 'fill';
+        estimateGroup.alignChildren = ['left', 'center'];
+        estimateGroup.preferredSize.width = optionPanelWidth - 32;
+        estimateGroup.margins = 0;
+        var estimateText = estimateGroup.add('statictext', undefined, uiText('estimateTime') + ': ' + formatEstimatedTime(estimateSec));
+        estimateText.alignment = ['left', 'center'];
+        estimateText.justify = 'left';
+        estimateText.helpTip = uiText('estimateHelp');
+        if (estimateSec >= 60) setStaticTextRed(estimateText);
+    }
 
     // ボタン
     var btnGroup = leftColumn.add('group');
@@ -1467,7 +1510,12 @@ function showConvertOptionsDialog(stats, doc) {
         var panelWidth = listWidth + 20;
         var position = [dlg.location.x, dlg.location.y];
         if (expanded && !swatchPanel) {
-            swatchCatalog = readIgnoredSwatchCatalog(doc || app.activeDocument);
+            if (useIwashiKit) {
+                try { swatchCatalog = IwashiKitGCRBridge.listIgnoredSwatches(); }
+                catch (error) { swatchCatalog = { entries: [], failures: 0, failed: true }; }
+            } else {
+                swatchCatalog = readIgnoredSwatchCatalog(doc || app.activeDocument);
+            }
             swatchPanel = dlg.add('panel', undefined, uiText('ignoredSwatchList'));
             swatchPanel.alignment = ['left', 'top'];
             swatchList = createIgnoredSwatchList(swatchPanel, swatchCatalog, panelWidth, leftSize[1]);
@@ -1521,7 +1569,8 @@ function showConvertOptionsDialog(stats, doc) {
         for (var si = 0; si < swatchCatalog.entries.length; si++) {
             var swatch = swatchCatalog.entries[si];
             if (swatch.ignored) result.ignoredSwatches.push({
-                key: swatch.key, kind: swatch.kind, name: swatch.name, preview: swatch.preview
+                key: swatch.key, kind: swatch.kind, name: swatch.name, preview: swatch.preview,
+                previewHex: swatch.previewHex, previewKind: swatch.previewKind
             });
         }
     }
@@ -4283,7 +4332,8 @@ function validateActiveDocument() {
             alert(uiText('requireCMYK'));
             return null;
         }
-        if (!doc.selection || doc.selection.length === 0) {
+        var selection = doc.selection;
+        if (!selection || selection.length === 0) {
             alert(uiText('requireSelection'));
             return null;
         }
@@ -4459,16 +4509,19 @@ function maxMetricTextWidth(items, minWidth) {
     return width;
 }
 
-function completionMetricWidths(info) {
+function completionMetricWidths(info, changedKey, changedValue) {
+    var processingTime = formatMetricText('processingTime', info.processingTime);
+    var left = [formatMetricText('selectedObjects', info.selectedObjectCount)];
+    var right = [formatMetricText(changedKey, changedValue)];
+    if (info.usedIwashiKit) {
+        left.push(processingTime);
+    } else {
+        left.push(formatMetricText('cacheHitRate', info.cacheHitRate));
+        right.push(processingTime);
+    }
     return {
-        left: maxMetricTextWidth([
-            formatMetricText('selectedObjects', info.selectedObjectCount),
-            formatMetricText('cacheHitRate', info.cacheHitRate)
-        ], COMPLETION_METRIC_LEFT_MIN_WIDTH),
-        right: maxMetricTextWidth([
-            formatMetricText('updatedColors', info.updatedColors),
-            formatMetricText('processingTime', info.processingTime)
-        ], COMPLETION_METRIC_RIGHT_MIN_WIDTH)
+        left: maxMetricTextWidth(left, COMPLETION_METRIC_LEFT_MIN_WIDTH),
+        right: maxMetricTextWidth(right, COMPLETION_METRIC_RIGHT_MIN_WIDTH)
     };
 }
 
@@ -4581,9 +4634,15 @@ function showCompletionDialog(info) {
     metricsGroup.alignChildren = ['left', 'center'];
     metricsGroup.spacing = 4;
     metricsGroup.margins = 0;
-    var metricWidths = completionMetricWidths(info);
-    addCompletionMetricRow(metricsGroup, 'selectedObjects', info.selectedObjectCount, 'updatedColors', info.updatedColors, metricWidths);
-    addCompletionMetricRow(metricsGroup, 'cacheHitRate', info.cacheHitRate, 'processingTime', info.processingTime, metricWidths, info.processingTimeHelp);
+    var changedKey = info.usedIwashiKit ? 'changedObjects' : 'updatedColors';
+    var changedValue = info.usedIwashiKit ? info.changedObjectCount : info.updatedColors;
+    var metricWidths = completionMetricWidths(info, changedKey, changedValue);
+    addCompletionMetricRow(metricsGroup, 'selectedObjects', info.selectedObjectCount, changedKey, changedValue, metricWidths);
+    if (info.usedIwashiKit) {
+        addCompletionMetricCell(metricsGroup, 'processingTime', info.processingTime, metricWidths.left, info.processingTimeHelp);
+    } else {
+        addCompletionMetricRow(metricsGroup, 'cacheHitRate', info.cacheHitRate, 'processingTime', info.processingTime, metricWidths, info.processingTimeHelp);
+    }
 
     if (info.ignoredCount > 0) {
         metricsGroup.add('statictext', undefined, formatMetricText('ignoredObjects', formatNumberWithUnit(info.ignoredCount, 'selectedObjectsUnit')));
@@ -4681,6 +4740,216 @@ function cleanupAfterRun() {
 }
 
 
+// GCRPluginBridge.jsxinc
+var IwashiKitGCRBridge = (function () {
+    function pluginError(code, message) {
+        var error = new Error(message);
+        error.code = code;
+        return error;
+    }
+
+    function request(selector, input) {
+        var response;
+        try {
+            response = app.sendScriptMessage("IwashiKit", selector, input);
+        } catch (error) {
+            throw pluginError("messageFailed", String(error));
+        }
+        if (typeof response === "string" && response.indexOf("error:") === 0) {
+            throw pluginError(response.split(":")[1], response);
+        }
+        if (typeof response !== "string" || response.indexOf("schemaVersion\t1\n") !== 0) {
+            throw pluginError("invalidResponse", "Invalid IwashiKit GCR response");
+        }
+        return response.split("\n");
+    }
+
+    function isAvailable() {
+        try {
+            return request("getGCRCapabilities", "")[1] === "algorithmVersion\t2.7";
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function readCount(value) {
+        var count = Number(value);
+        if (!/^\d+$/.test(value) || !isFinite(count)) {
+            throw pluginError("invalidResponse", "Invalid IwashiKit GCR count");
+        }
+        return count;
+    }
+
+    function listIgnoredSwatches() {
+        var rows = request("listGCRSwatches", "");
+        var version = rows[1].split("\t");
+        if (version[0] !== "catalogVersion" || !/^[1-9]\d*$/.test(version[1])) {
+            throw pluginError("invalidResponse", "Invalid IwashiKit swatch catalog");
+        }
+        var catalog = { entries: [], failures: 0, failed: false };
+        for (var i = 2; i < rows.length; i++) {
+            if (!rows[i]) continue;
+            var row = rows[i].split("\t");
+            if (row[0] === "failures") {
+                catalog.failures = readCount(row[1]);
+            } else if (row[0] === "swatch") {
+                if (row.length !== 5 || !/^[1-9]\d*$/.test(row[1]) ||
+                    !/^(global|spot|gradient)$/.test(row[2])) {
+                    throw pluginError("invalidResponse", "Invalid IwashiKit swatch entry");
+                }
+                catalog.entries.push({
+                    key: version[1] + ":" + row[1],
+                    kind: row[2],
+                    name: decodeURIComponent(row[3]),
+                    previewHex: row[4],
+                    ignored: false
+                });
+            }
+        }
+        return catalog;
+    }
+
+    function apply(options, locale) {
+        var ignored = options.ignoredSwatches || [];
+        var version = "0";
+        var ids = [];
+        var byID = {};
+        var i;
+        for (i = 0; i < ignored.length; i++) {
+            var key = /^([1-9]\d*):([1-9]\d*)$/.exec(ignored[i].key);
+            if (!key || (i > 0 && version !== key[1])) {
+                throw pluginError("invalidGCRSettings", "Invalid IwashiKit swatch selection");
+            }
+            version = key[1];
+            ids.push(key[2]);
+            byID[key[2]] = ignored[i];
+        }
+        var input = [
+            "1",
+            options.enableSaturationBoost ? options.saturationBoostPct : 0,
+            options.enableCMYKBalance ? options.cmyKBalanceValue : 0,
+            options.enableKBoost ? 1 : 0,
+            options.enableLightColorProtect ? 1 : 0,
+            options.avoidAutoBlackOverprint ? 1 : 0,
+            options.selectSkippedObjects ? 1 : 0,
+            locale === "ja" ? "ja" : "en",
+            version,
+            ids.join(",")
+        ].join("\t");
+
+        var rows = request("applyGCRSelection", input);
+        var result = { skipDetails: [], unsupportedTypes: [], ignoredSwatches: [], documentRedrawn: false };
+        var counts = ["selectedObjects", "changedObjects", "ignoredObjects", "skippedObjects",
+            "selectedSkippedObjects", "overprintAdjustedPaints", "processingUs"];
+        var found = {};
+        if (rows[1] !== "status\tok") {
+            throw pluginError("invalidResponse", "Invalid IwashiKit GCR status");
+        }
+        for (i = 2; i < rows.length; i++) {
+            if (!rows[i]) continue;
+            var row = rows[i].split("\t");
+            var name = row[0];
+            if (name.indexOf("skip.") === 0) {
+                result.skipDetails.push({ key: name.substring(5), count: readCount(row[1]) });
+            } else if (name.indexOf("unsupported.") === 0) {
+                result.unsupportedTypes.push({ key: name.substring("unsupported.".length), count: readCount(row[1]) });
+            } else if (name === "ignoredSwatch") {
+                if (/^[1-9]\d*$/.test(row[1]) && byID[row[1]]) result.ignoredSwatches.push(byID[row[1]]);
+            } else if (name === "documentRedrawn") {
+                result.documentRedrawn = row[1] === "1";
+            } else {
+                for (var index = 0; index < counts.length; index++) {
+                    if (name === counts[index]) {
+                        result[name] = readCount(row[1]);
+                        found[name] = true;
+                        break;
+                    }
+                }
+            }
+        }
+        for (i = 0; i < counts.length; i++) {
+            if (!found[counts[i]]) throw pluginError("invalidResponse", "Incomplete IwashiKit GCR report");
+        }
+        return result;
+    }
+
+    return { isAvailable: isAvailable, listIgnoredSwatches: listIgnoredSwatches, apply: apply };
+}());
+
+function applyWithIwashiKit(doc, options) {
+    var start = nowMs();
+    var report;
+    try {
+        report = IwashiKitGCRBridge.apply(options, currentLocaleCode());
+    } catch (error) {
+        var messageKey = {
+            noDocument: 'requireCMYK',
+            requiresCMYK: 'requireCMYK',
+            noSelection: 'requireSelection',
+            swatchCatalogChanged: 'iwashiKitSwatchesChanged',
+            apply: 'iwashiKitApplyReverted',
+            rollback: 'iwashiKitRollbackFailed'
+        }[error.code];
+        alert(messageKey ? uiText(messageKey) : uiText('iwashiKitApplyFailed') + '\n' + error.message);
+        return;
+    }
+
+    if (!report.documentRedrawn) {
+        try { app.redraw(); } catch (redrawError) { }
+    }
+    var elapsed = (nowMs() - start) / 1000;
+    var finalSelection = null;
+    if (options.selectSkippedObjects) {
+        if (report.selectedSkippedObjects === 0) {
+            finalSelection = [];
+        } else {
+            try {
+                var selection = doc.selection;
+                if (selection && selection.length > 0) finalSelection = selection.slice(0);
+            } catch (selectionError) { }
+        }
+    }
+    var skippedDetails = [];
+    for (var t = 0; t < report.unsupportedTypes.length; t++) {
+        var unsupported = report.unsupportedTypes[t];
+        addSkipBreakdownEntry(skippedDetails, "unsupported:" + unsupported.key,
+            unsupportedObjectTypeLabel(unsupported.key), unsupported.count);
+    }
+    for (var i = 0; i < report.skipDetails.length; i++) {
+        var detail = report.skipDetails[i];
+        if (detail.key === 'unsupportedObject' && report.unsupportedTypes.length > 0) continue;
+        addSkipBreakdownEntry(skippedDetails, detail.key, skipReasonLabel(detail.key), detail.count);
+    }
+    var skippedMessage = '';
+    if (options.selectSkippedObjects && report.skippedObjects > 0) {
+        skippedMessage = report.selectedSkippedObjects < report.skippedObjects
+            ? uiFormat('skippedObjectsPartiallySelected', {
+                selected: report.selectedSkippedObjects,
+                total: report.skippedObjects
+            })
+            : uiText('skippedObjectsSelected');
+    }
+    var secondsUnit = ' ' + uiText('secondsUnit');
+    showCompletionDialog({
+        usedIwashiKit: true,
+        selectedObjectCount: formatNumberWithUnit(report.selectedObjects, 'selectedObjectsUnit'),
+        changedObjectCount: formatNumberWithUnit(report.changedObjects, 'selectedObjectsUnit'),
+        processingTime: elapsed.toFixed(3) + secondsUnit,
+        processingTimeHelp: formatMetricText('iwashiKitTime', (report.processingUs / 1000000).toFixed(3) + secondsUnit),
+        ignoredCount: report.ignoredObjects,
+        ignoredSwatches: report.ignoredSwatches,
+        skippedCount: report.skippedObjects,
+        skippedDetails: skippedDetails,
+        skippedMessage: skippedMessage,
+        showAutoBlackOverprintNotice: report.overprintAdjustedPaints > 0
+    });
+
+    // Closing the completion dialog can clear the selection set by the SDK.
+    if (finalSelection && selectItems(doc, finalSelection) > 0) {
+        try { app.redraw(); } catch (selectionRedrawError) { }
+    }
+}
+
 /////////////////////////////////////////
 // メイン処理関数
 /////////////////////////////////////////
@@ -4690,6 +4959,12 @@ function cleanupAfterRun() {
     function main() {
         var doc = validateActiveDocument();
         if (!doc) return;
+
+        if (IwashiKitGCRBridge.isAvailable()) {
+            var kitOptions = showConvertOptionsDialog(null, doc, true);
+            if (kitOptions && kitOptions.ok) applyWithIwashiKit(doc, kitOptions);
+            return;
+        }
 
         resetSkipCount();
 
